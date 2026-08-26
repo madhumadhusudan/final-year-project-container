@@ -1,0 +1,38 @@
+# Frontend
+node_modules/
+dist/
+
+# Environment and virtual environments
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Private runtime data (keep directory placeholders)
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/outputs/*
+!backend/outputs/.gitkeep
+
+# Model weights and large AI artifacts
+*.pt
+*.pth
+*.onnx
+*.engine
+backend/models/*
+!backend/models/.gitkeep
+
+# IDE, OS, and tooling caches
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+.eslintcache
+

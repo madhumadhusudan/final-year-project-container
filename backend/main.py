@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routes.analysis import router as analysis_router
+
 app = FastAPI(
     title="Social Media Privacy Guard API",
-    description="Backend foundation for context-aware image anonymization.",
-    version="0.1.0",
+    description="Local AI detection API for context-aware image anonymization.",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -14,9 +16,11 @@ app.add_middleware(
         "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+app.include_router(analysis_router)
 
 
 @app.get("/")
@@ -33,4 +37,3 @@ async def health() -> dict[str, str]:
         "status": "healthy",
         "service": "privacy-guard-backend",
     }
-

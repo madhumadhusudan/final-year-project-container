@@ -20,7 +20,7 @@ test('rejects PDF, text and untyped files', () => {
 
 test('accepts exactly 10 MB and rejects larger images', () => {
   assert.equal(getImageFileError(mockFile({ size: MAX_IMAGE_SIZE })), '')
-  assert.equal(getImageFileError(mockFile({ size: MAX_IMAGE_SIZE + 1 })), 'Image must be smaller than 10 MB.')
+  assert.equal(getImageFileError(mockFile({ size: MAX_IMAGE_SIZE + 1 })), 'Image must be 10 MB or smaller.')
 })
 
 test('handles a missing selection safely', () => {

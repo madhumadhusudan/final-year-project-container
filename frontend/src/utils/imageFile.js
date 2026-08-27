@@ -4,7 +4,7 @@ export const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 export function getImageFileError(file) {
   if (!file) return 'No image selected.'
   if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) return 'Unsupported image format. Choose a JPG, PNG or WEBP image.'
-  if (file.size > MAX_IMAGE_SIZE) return 'Image must be smaller than 10 MB.'
+  if (file.size > MAX_IMAGE_SIZE) return 'Image must be 10 MB or smaller.'
   return ''
 }
 

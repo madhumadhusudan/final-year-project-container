@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import AnalysisPanel from './components/AnalysisPanel.jsx'
 import Footer from './components/Footer.jsx'
 import HeroSection from './components/HeroSection.jsx'
@@ -6,7 +6,7 @@ import HowItWorks from './components/HowItWorks.jsx'
 import Navbar from './components/Navbar.jsx'
 import PrivacyControls from './components/PrivacyControls.jsx'
 import ResultsPanel from './components/ResultsPanel.jsx'
-import { getBackendHealth } from './services/api.js'
+import { analyzeImage, getBackendHealth } from './services/api.js'
 import { getImageFileError } from './utils/imageFile.js'
 
 function App() {
@@ -16,6 +16,9 @@ function App() {
   const [imageMetadata, setImageMetadata] = useState(null)
   const [uploadError, setUploadError] = useState('')
   const [analysisStatus, setAnalysisStatus] = useState('idle')
+  const [analysisResult, setAnalysisResult] = useState(null)
+  const [analysisError, setAnalysisError] = useState('')
+  const analysisControllerRef = useRef(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -30,6 +33,8 @@ function App() {
     checkBackend()
     return () => controller.abort()
   }, [])
+
+  useEffect(() => () => analysisControllerRef.current?.abort(), [])
 
   useEffect(() => {
     if (!selectedFile) {
@@ -47,17 +52,23 @@ function App() {
       setUploadError(error)
       return
     }
+    analysisControllerRef.current?.abort()
     setUploadError('')
     setAnalysisStatus('idle')
+    setAnalysisResult(null)
+    setAnalysisError('')
     setImageMetadata({ name: file.name, type: file.type, size: file.size, width: null, height: null })
     setSelectedFile(file)
   }, [])
 
   const removeImage = useCallback(() => {
+    analysisControllerRef.current?.abort()
     setSelectedFile(null)
     setImageMetadata(null)
     setUploadError('')
     setAnalysisStatus('idle')
+    setAnalysisResult(null)
+    setAnalysisError('')
   }, [])
 
   const handleImageLoaded = useCallback(({ width, height }) => {
@@ -68,11 +79,31 @@ function App() {
     setSelectedFile(null)
     setImageMetadata(null)
     setAnalysisStatus('idle')
+    setAnalysisResult(null)
+    setAnalysisError('')
     setUploadError('This image could not be previewed. Please choose a valid JPG, PNG or WEBP image.')
   }, [])
 
-  const handleAnalyze = useCallback(() => {
-    if (selectedFile) setAnalysisStatus('ready')
+  const handleAnalyze = useCallback(async () => {
+    if (!selectedFile) return
+    analysisControllerRef.current?.abort()
+    const controller = new AbortController()
+    analysisControllerRef.current = controller
+    setAnalysisStatus('analyzing')
+    setAnalysisResult(null)
+    setAnalysisError('')
+    try {
+      const result = await analyzeImage(selectedFile, controller.signal)
+      if (analysisControllerRef.current !== controller) return
+      setAnalysisResult(result)
+      setAnalysisStatus('success')
+    } catch (error) {
+      if (error.name === 'AbortError' || analysisControllerRef.current !== controller) return
+      setAnalysisError(error.message || 'Image analysis failed. Please try again.')
+      setAnalysisStatus('error')
+    } finally {
+      if (analysisControllerRef.current === controller) analysisControllerRef.current = null
+    }
   }, [selectedFile])
 
   return (
@@ -85,7 +116,7 @@ function App() {
             <div className="mb-7 max-w-2xl">
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-700">Privacy workspace</p>
               <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">Check an image before it goes public</h2>
-              <p className="mt-2 leading-7 text-slate-600">Your image stays in this browser during this stage. Nothing is uploaded or stored.</p>
+              <p className="mt-2 leading-7 text-slate-600">Your image is sent only to your local detection service, processed transiently, and never retained.</p>
             </div>
             <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.75fr)]">
               <AnalysisPanel
@@ -94,6 +125,7 @@ function App() {
                 imageMetadata={imageMetadata}
                 uploadError={uploadError}
                 analysisStatus={analysisStatus}
+                detections={analysisResult?.detections || []}
                 onFileSelect={selectImage}
                 onRemove={removeImage}
                 onImageLoaded={handleImageLoaded}
@@ -102,7 +134,7 @@ function App() {
               />
               <PrivacyControls />
             </div>
-            <ResultsPanel analysisStatus={analysisStatus} hasImage={Boolean(selectedFile)} />
+            <ResultsPanel analysisStatus={analysisStatus} hasImage={Boolean(selectedFile)} result={analysisResult} error={analysisError} />
           </div>
         </section>
         <HowItWorks />
@@ -111,7 +143,7 @@ function App() {
             <div className="max-w-2xl">
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-300">Built around privacy</p>
               <h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Your photo should be checked before it is shared.</h2>
-              <p className="mt-3 leading-7 text-teal-50/75">Day 2 keeps images in temporary browser memory only. No third-party services, cloud storage or AI APIs receive your photo.</p>
+              <p className="mt-3 leading-7 text-teal-50/75">Day 3 runs face and person models on your local FastAPI service. Uploads are closed after each request and are not forwarded to cloud AI APIs.</p>
             </div>
             <a href="#analyze" className="inline-flex shrink-0 items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-teal-950 shadow-sm transition hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Choose an image</a>
           </div>

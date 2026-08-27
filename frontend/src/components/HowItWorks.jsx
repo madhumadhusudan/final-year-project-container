@@ -1,9 +1,9 @@
 import { CheckIcon, ShieldIcon, UploadIcon } from './Icons.jsx'
 
 const steps = [
-  { title: 'Choose an image', text: 'Drop a JPG, PNG or WEBP file into the secure browser workspace.', icon: UploadIcon },
+  { title: 'Choose an image', text: 'Drop a JPG, PNG or WEBP file into the local privacy workspace.', icon: UploadIcon },
   { title: 'Review before sharing', text: 'Confirm the preview and image details before requesting analysis.', icon: CheckIcon },
-  { title: 'Protect sensitive areas', text: 'AI detection and anonymization controls arrive in the next stages.', icon: ShieldIcon },
+  { title: 'Review real detections', text: 'Inspect face and person boxes, confidence, and explainable subject classification.', icon: ShieldIcon },
 ]
 
 function HowItWorks() {

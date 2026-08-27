@@ -93,11 +93,16 @@ assert.equal(await evaluate(`document.body.scrollWidth <= window.innerWidth`), t
 assert.equal(await evaluate(`document.body.innerText.includes('Drop your image here')`), true)
 assert.equal(await evaluate(`document.body.innerText.includes('No analysis results yet')`), true)
 
+for (const width of [320, 375, 430, 768, 1024, 1366, 1440, 1920]) {
+  await send('Emulation.setDeviceMetricsOverride', { width, height: width < 768 ? 844 : 1000, deviceScaleFactor: 1, mobile: width < 768 })
+  assert.equal(await evaluate(`document.body.scrollWidth <= window.innerWidth`), true, `${width}px layout must not overflow horizontally`)
+}
+
 await send('Emulation.setDeviceMetricsOverride', { width: 375, height: 844, deviceScaleFactor: 1, mobile: true })
 assert.equal(await evaluate(`document.body.scrollWidth <= window.innerWidth`), true, 'Mobile page must not overflow horizontally')
 assert.equal(await evaluate(`Boolean(document.querySelector('button[aria-label="Open navigation menu"]'))`), true)
 const mobileScreenshot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true })
-await writeFile('../docs/day2-mobile-emulated.png', Buffer.from(mobileScreenshot.data, 'base64'))
+await writeFile('../docs/day3-mobile-emulated.png', Buffer.from(mobileScreenshot.data, 'base64'))
 await evaluate(`document.querySelector('button[aria-label="Open navigation menu"]').click()`)
 assert.equal(await evaluate(`document.body.innerText.includes('How It Works')`), true)
 await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
@@ -108,8 +113,8 @@ assert.equal(await evaluate(`document.body.innerText.includes('portrait-photo.jp
 assert.equal(await evaluate(`document.querySelector('img[alt="Preview of portrait-photo.jpg"]').naturalWidth === 400`), true)
 
 await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.innerText.includes('Analyze Privacy')).click()`)
-await waitFor(`document.body.innerText.includes('AI detection will be connected in the next development stage.')`, 'analysis readiness state')
-assert.equal(await evaluate(`document.body.innerText.includes('Ready for Day 3 AI integration')`), true)
+await waitFor(`document.body.innerText.includes('No privacy-sensitive objects were detected in this image.')`, 'real no-detection analysis result', 15000)
+assert.equal(await evaluate(`document.body.innerText.includes('Completed in')`), true)
 
 await evaluate(selectGeneratedImage(600, 600, 'image/png', 'square-photo.png', 'replace'))
 await waitFor(`document.body.innerText.includes('600 × 600')`, 'square PNG replacement')
@@ -120,7 +125,7 @@ await waitFor(`document.body.innerText.includes('Unsupported image format.')`, '
 assert.equal(await evaluate(`document.body.innerText.includes('square-photo.png')`), true, 'Invalid replacement should preserve current image')
 
 await evaluate(chooseInvalidFile('image/jpeg', 'too-large.jpg', 10 * 1024 * 1024 + 1))
-await waitFor(`document.body.innerText.includes('Image must be smaller than 10 MB.')`, 'oversize validation')
+await waitFor(`document.body.innerText.includes('Image must be 10 MB or smaller.')`, 'oversize validation')
 
 await evaluate(selectGeneratedImage(800, 400, 'image/webp', 'landscape-photo.webp', 'replace'))
 await waitFor(`document.body.innerText.includes('800 × 400')`, 'landscape WEBP replacement')
@@ -158,4 +163,4 @@ await send('Network.setBlockedURLs', { urls: [] })
 assert.deepEqual(browserErrors, [], `Browser errors detected: ${browserErrors.join('; ')}`)
 socket.close()
 
-console.log('Browser flow passed: connected/offline states, responsive layouts, browse/drop, JPG/PNG/WEBP metadata, validation, analyze, replace, remove, and repeated upload.')
+console.log('Browser flow passed: local AI no-detection flow, connected/offline states, eight responsive widths, browse/drop, metadata, validation, replace, remove, and repeated upload.')

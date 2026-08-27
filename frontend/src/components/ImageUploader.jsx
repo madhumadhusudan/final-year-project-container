@@ -39,7 +39,7 @@ function ImageUploader({ onFileSelect, error }) {
         <span className="mt-5 text-lg font-bold text-slate-900">Drop your image here</span>
         <span className="mt-1 text-sm text-slate-600">or <span className="font-semibold text-teal-700">click to browse</span></span>
         <span id="upload-formats" className="mt-4 rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">JPG, PNG or WEBP · up to 10 MB</span>
-        <span id="upload-privacy" className="mt-4 text-xs leading-5 text-slate-500">Your image remains in browser memory.</span>
+        <span id="upload-privacy" className="mt-4 text-xs leading-5 text-slate-500">Processed temporarily by your local backend. Not stored or sent to a third party.</span>
       </button>
       <input ref={inputRef} type="file" className="sr-only" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={handleInputChange} aria-label="Choose a JPG, PNG or WEBP image" />
       <div id="upload-error" className="mt-3 min-h-6" role="alert" aria-live="polite">

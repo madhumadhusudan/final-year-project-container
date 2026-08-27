@@ -12,7 +12,7 @@ function HeroSection() {
         </div>
         <div className="hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm lg:block" aria-hidden="true">
           <div className="flex items-start gap-4"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-teal-100 text-teal-800"><ShieldIcon className="h-6 w-6" /></span><div><p className="font-bold text-slate-900">Share with awareness</p><p className="mt-1 text-sm leading-6 text-slate-600">A deliberate privacy check before every public post.</p></div></div>
-          <div className="mt-6 space-y-3 border-t border-slate-100 pt-5">{['Browser-only preview', 'No permanent storage', 'You stay in control'].map((item) => <div key={item} className="flex items-center gap-3 text-sm font-medium text-slate-700"><span className="h-2 w-2 rounded-full bg-teal-500" />{item}</div>)}</div>
+          <div className="mt-6 space-y-3 border-t border-slate-100 pt-5">{['Local AI inference', 'No permanent storage', 'You stay in control'].map((item) => <div key={item} className="flex items-center gap-3 text-sm font-medium text-slate-700"><span className="h-2 w-2 rounded-full bg-teal-500" />{item}</div>)}</div>
         </div>
       </div>
     </section>

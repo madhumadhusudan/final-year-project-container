@@ -33,7 +33,7 @@ async function getErrorMessage(response) {
 export async function analyzeImage(file, signal) {
   const formData = new FormData()
   formData.append('image', file, file.name)
-  const response = await fetch(`${API_BASE_URL}/api/v1/analyze/image`, {
+  const response = await fetch(`${API_BASE_URL}/analyze`, {
     method: 'POST',
     body: formData,
     headers: { Accept: 'application/json' },

@@ -1,28 +1,27 @@
-export function clampUnit(value) {
-  return Math.max(0, Math.min(1, Number(value) || 0))
+export function clamp(value, minimum, maximum) {
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) ? Math.max(minimum, Math.min(maximum, numericValue)) : minimum
 }
 
-export function getBoundingBoxStyle(normalizedBoundingBox) {
-  const x = clampUnit(normalizedBoundingBox?.x)
-  const y = clampUnit(normalizedBoundingBox?.y)
-  const width = Math.min(clampUnit(normalizedBoundingBox?.width), 1 - x)
-  const height = Math.min(clampUnit(normalizedBoundingBox?.height), 1 - y)
+export function getBoundingBoxStyle(boundingBox, imageWidth, imageHeight) {
+  if (!(imageWidth > 0) || !(imageHeight > 0)) return { display: 'none' }
+  const x1 = clamp(boundingBox?.x1, 0, imageWidth)
+  const y1 = clamp(boundingBox?.y1, 0, imageHeight)
+  const x2 = clamp(boundingBox?.x2, x1, imageWidth)
+  const y2 = clamp(boundingBox?.y2, y1, imageHeight)
   return {
-    left: `${x * 100}%`,
-    top: `${y * 100}%`,
-    width: `${width * 100}%`,
-    height: `${height * 100}%`,
+    left: `${(x1 / imageWidth) * 100}%`,
+    top: `${(y1 / imageHeight) * 100}%`,
+    width: `${((x2 - x1) / imageWidth) * 100}%`,
+    height: `${((y2 - y1) / imageHeight) * 100}%`,
   }
 }
 
 export function formatConfidence(confidence) {
-  return `${(clampUnit(confidence) * 100).toFixed(1)}%`
+  return `${(clamp(confidence, 0, 1) * 100).toFixed(1)}%`
 }
 
-export function formatCategory(category) {
-  return {
-    face: 'Face',
-    person: 'Person',
-    background_person: 'Background person',
-  }[category] || 'Detection'
+export function formatClassName(className) {
+  if (!className) return 'Object'
+  return className.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }

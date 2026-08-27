@@ -8,92 +8,67 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-Category = Literal["face", "person", "background_person"]
-
-
 @dataclass(frozen=True)
 class RawDetection:
-    category: Literal["face", "person"]
+    class_id: int
+    class_name: str
     confidence: float
-    x: int
-    y: int
-    width: int
-    height: int
-    source: str
-    is_main_subject: bool = False
-    subject_score: float | None = None
-    explanation: str = ""
+    x1: int
+    y1: int
+    x2: int
+    y2: int
 
     @property
-    def x2(self) -> int:
-        return self.x + self.width
+    def width(self) -> int:
+        return self.x2 - self.x1
 
     @property
-    def y2(self) -> int:
-        return self.y + self.height
+    def height(self) -> int:
+        return self.y2 - self.y1
 
     def clipped(self, image_width: int, image_height: int) -> RawDetection:
-        x1 = max(0, min(self.x, image_width))
-        y1 = max(0, min(self.y, image_height))
+        x1 = max(0, min(self.x1, image_width))
+        y1 = max(0, min(self.y1, image_height))
         x2 = max(x1, min(self.x2, image_width))
         y2 = max(y1, min(self.y2, image_height))
-        return replace(self, x=x1, y=y1, width=x2 - x1, height=y2 - y1)
+        return replace(self, x1=x1, y1=y1, x2=x2, y2=y2)
 
 
 class BoundingBox(BaseModel):
-    x: int = Field(ge=0)
-    y: int = Field(ge=0)
-    width: int = Field(ge=0)
-    height: int = Field(ge=0)
+    x1: int = Field(ge=0)
+    y1: int = Field(ge=0)
     x2: int = Field(ge=0)
     y2: int = Field(ge=0)
 
 
-class NormalizedBoundingBox(BaseModel):
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
-    width: float = Field(ge=0, le=1)
-    height: float = Field(ge=0, le=1)
-
-
-class CenterPoint(BaseModel):
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
-
-
 class DetectionResult(BaseModel):
-    id: str
-    category: Category
-    label: str
+    id: int = Field(gt=0)
+    class_id: int = Field(ge=0)
+    class_name: str
     confidence: float = Field(ge=0, le=1)
-    boundingBox: BoundingBox
-    normalizedBoundingBox: NormalizedBoundingBox
-    center: CenterPoint
-    relativeArea: float = Field(ge=0, le=1)
-    isMainSubject: bool
-    subjectScore: float | None = Field(default=None, ge=0, le=1)
-    recommendedAnonymization: bool
-    explanation: str
-    source: str
+    bounding_box: BoundingBox
 
 
 class ImageDetails(BaseModel):
+    filename: str
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     format: str
 
 
-class DetectionSummary(BaseModel):
-    totalObjects: int = Field(ge=0)
-    faces: int = Field(ge=0)
-    people: int = Field(ge=0)
-    backgroundFaces: int = Field(ge=0)
-    mainSubjectDetected: bool
+class AnalysisDetails(BaseModel):
+    status: Literal["completed"] = "completed"
+    model: str
+    detection_count: int = Field(ge=0)
+    detections: list[DetectionResult]
+
+
+class PerformanceDetails(BaseModel):
+    inference_time_ms: int = Field(ge=0)
 
 
 class AnalysisResponse(BaseModel):
-    success: Literal[True] = True
+    status: Literal["success"] = "success"
     image: ImageDetails
-    detections: list[DetectionResult]
-    summary: DetectionSummary
-    processingTimeMs: int = Field(ge=0)
+    analysis: AnalysisDetails
+    performance: PerformanceDetails

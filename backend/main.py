@@ -1,12 +1,22 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.detection.service import get_detection_service
 from app.routes.analysis import router as analysis_router
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    get_detection_service()
+    yield
 
 app = FastAPI(
     title="Social Media Privacy Guard API",
     description="Local AI detection API for context-aware image anonymization.",
-    version="0.3.0",
+    version="0.4.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

@@ -125,7 +125,7 @@ function App() {
                 imageMetadata={imageMetadata}
                 uploadError={uploadError}
                 analysisStatus={analysisStatus}
-                detections={analysisResult?.detections || []}
+                result={analysisResult}
                 onFileSelect={selectImage}
                 onRemove={removeImage}
                 onImageLoaded={handleImageLoaded}
@@ -143,7 +143,7 @@ function App() {
             <div className="max-w-2xl">
               <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-300">Built around privacy</p>
               <h2 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Your photo should be checked before it is shared.</h2>
-              <p className="mt-3 leading-7 text-teal-50/75">Day 3 runs face and person models on your local FastAPI service. Uploads are closed after each request and are not forwarded to cloud AI APIs.</p>
+              <p className="mt-3 leading-7 text-teal-50/75">YOLOv8 runs on your local FastAPI service. Uploads are closed after each request and are not forwarded to cloud AI APIs.</p>
             </div>
             <a href="#analyze" className="inline-flex shrink-0 items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-teal-950 shadow-sm transition hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Choose an image</a>
           </div>

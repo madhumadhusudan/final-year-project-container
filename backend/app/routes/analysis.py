@@ -10,17 +10,18 @@ from app.detection.service import DetectionService, get_detection_service
 from app.schemas import AnalysisResponse
 from app.utils.image_validation import read_and_validate_image
 
-router = APIRouter(prefix="/api/v1/analyze", tags=["analysis"])
+router = APIRouter(tags=["analysis"])
 
 
-@router.post("/image", response_model=AnalysisResponse)
+@router.post("/analyze", response_model=AnalysisResponse)
+@router.post("/api/v1/analyze/image", response_model=AnalysisResponse, include_in_schema=False)
 async def analyze_image(
     image: UploadFile = File(...),
     service: DetectionService = Depends(get_detection_service),
 ) -> AnalysisResponse:
     decoded = await read_and_validate_image(image)
     try:
-        return await asyncio.to_thread(service.analyze, decoded)
+        return await asyncio.to_thread(service.analyze, decoded, image.filename or "image")
     except HTTPException:
         raise
     except Exception as exc:

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.detection.service import get_detection_service
 from app.routes.analysis import router as analysis_router
+from app.routes.protection import router as protection_router
 
 
 @asynccontextmanager
@@ -15,7 +16,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="Social Media Privacy Guard API",
     description="Local AI detection API for context-aware image anonymization.",
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan,
 )
 
@@ -28,9 +29,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["X-Protection-Metadata", "Content-Disposition"],
 )
 
 app.include_router(analysis_router)
+app.include_router(protection_router)
 
 
 @app.get("/")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 @dataclass(frozen=True)
@@ -203,3 +203,31 @@ class AnalysisResponse(BaseModel):
     image: ImageDetails
     analysis: AnalysisDetails
     performance: PerformanceDetails
+
+
+class ProtectionSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    protect_background_faces: bool = True
+    protect_license_plates: bool = True
+    protect_cards: bool = True
+    protect_sensitive_text: bool = True
+    anonymization_method: Literal["blur", "pixelate", "blackout"] = "blur"
+    strength: Literal["low", "medium", "high"] = "medium"
+
+
+class ProtectionBreakdown(BaseModel):
+    background_faces: int = Field(default=0, ge=0)
+    license_plates: int = Field(default=0, ge=0)
+    cards: int = Field(default=0, ge=0)
+    sensitive_text: int = Field(default=0, ge=0)
+
+
+class ProtectionMetadata(BaseModel):
+    status: Literal["completed"] = "completed"
+    method: Literal["blur", "pixelate", "blackout"]
+    strength: Literal["low", "medium", "high"]
+    regions_protected: int = Field(ge=0)
+    breakdown: ProtectionBreakdown
+    main_subject_preserved: bool
+    warnings: list[str] = Field(default_factory=list)

@@ -33,13 +33,44 @@ async function getErrorMessage(response) {
 export async function analyzeImage(file, signal) {
   const formData = new FormData()
   formData.append('image', file, file.name)
-  const response = await fetch(`${API_BASE_URL}/analyze`, {
-    method: 'POST',
-    body: formData,
-    headers: { Accept: 'application/json' },
-    signal,
-  })
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}/analyze`, {
+      method: 'POST', body: formData,
+      headers: { Accept: 'application/json' }, signal,
+    })
+  } catch (error) {
+    if (error.name === 'AbortError') throw error
+    throw new Error('The local backend is offline. Start it and try again.')
+  }
 
   if (!response.ok) throw new Error(await getErrorMessage(response))
   return response.json()
+}
+
+export async function protectImage(file, analysis, settings, signal) {
+  const formData = new FormData()
+  formData.append('image', file, file.name)
+  formData.append('analysis', JSON.stringify(analysis))
+  formData.append('settings', JSON.stringify(settings))
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}/protect`, {
+      method: 'POST', body: formData,
+      headers: { Accept: 'image/jpeg,image/png,image/webp' }, signal,
+    })
+  } catch (error) {
+    if (error.name === 'AbortError') throw error
+    throw new Error('The local backend is offline. Start it and try again.')
+  }
+  if (!response.ok) throw new Error(await getErrorMessage(response))
+  const rawMetadata = response.headers.get('X-Protection-Metadata')
+  if (!rawMetadata) throw new Error('The backend returned an image without protection details.')
+  let protection
+  try {
+    protection = JSON.parse(decodeURIComponent(rawMetadata))
+  } catch {
+    throw new Error('The backend returned invalid protection details.')
+  }
+  return { blob: await response.blob(), protection }
 }

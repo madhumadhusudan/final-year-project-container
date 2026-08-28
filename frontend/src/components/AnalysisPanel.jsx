@@ -25,7 +25,7 @@ function AnalysisPanel({ selectedFile, previewUrl, imageMetadata, uploadError, a
   const sensitiveTexts = result?.analysis?.sensitive_text?.items || []
   return (
     <article className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-      <div className="mb-5 flex items-start justify-between gap-4"><div><h3 className="text-lg font-bold text-slate-950">Image analysis</h3><p className="mt-1 text-sm leading-6 text-slate-600">Select one image for local YOLOv8 object detection.</p></div><span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Step 1 of 2</span></div>
+      <div className="mb-5 flex items-start justify-between gap-4"><div><h3 className="text-lg font-bold text-slate-950">Image analysis</h3><p className="mt-1 text-sm leading-6 text-slate-600">Select one image for local privacy detection.</p></div><span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Step 1 of 3</span></div>
       {!selectedFile ? <ImageUploader onFileSelect={onFileSelect} error={uploadError} /> : <div>
         <ImagePreview previewUrl={previewUrl} filename={selectedFile.name} image={result?.image} detections={detections} faces={faces} plates={plates} cards={cards} sensitiveTexts={sensitiveTexts} showObjects={showObjects} showFaces={showFaces} showPlates={showPlates} showCards={showCards} showSensitiveText={showSensitiveText} isAnalyzing={analysisStatus === 'analyzing'} onLoaded={onImageLoaded} onError={onImageError} />
         {(detections.length > 0 || faces.length > 0 || plates.length > 0 || cards.length > 0 || sensitiveTexts.length > 0) && <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1">

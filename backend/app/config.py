@@ -44,6 +44,22 @@ class Settings:
     face_model_path: Path = Path(
         os.getenv("FACE_MODEL_PATH", str(BACKEND_DIR / "models" / "face_detection_yunet_2023mar.onnx"))
     )
+    license_plate_model_path: Path = Path(
+        os.getenv("LICENSE_PLATE_MODEL_PATH", str(BACKEND_DIR / "models" / "license_plate_detector.pt"))
+    )
+    card_model_path: Path = Path(
+        os.getenv("CARD_MODEL_PATH", str(BACKEND_DIR / "models" / "card_detector.pt"))
+    )
+    privacy_object_confidence_threshold: float = float(os.getenv("PRIVACY_OBJECT_CONFIDENCE_THRESHOLD", "0.35"))
+    license_plate_model_source: str = os.getenv("LICENSE_PLATE_MODEL_SOURCE", "")
+    card_model_source: str = os.getenv("CARD_MODEL_SOURCE", "")
+    subject_size_weight: float = 0.45
+    subject_center_weight: float = 0.25
+    subject_confidence_weight: float = 0.15
+    subject_person_weight: float = 0.15
+    subject_single_threshold: float = 0.45
+    subject_score_threshold: float = 0.60
+    subject_ambiguity_margin: float = 0.12
 
 
 settings = Settings()

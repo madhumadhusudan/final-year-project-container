@@ -28,6 +28,7 @@ backend/outputs/*
 backend/models/*
 !backend/models/.gitkeep
 !backend/models/face_detection_yunet_2023mar.onnx
+!backend/models/README.md
 
 # IDE, OS, and tooling caches
 .vscode/

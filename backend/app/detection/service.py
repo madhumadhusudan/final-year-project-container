@@ -7,20 +7,58 @@ from functools import lru_cache
 
 from app.config import Settings, settings
 from app.schemas import (
-    AnalysisDetails, AnalysisResponse, BoundingBox, DetectionResult, FaceDetectionDetails,
-    FaceResult, ImageDetails, ObjectDetectionDetails, PerformanceDetails, Point,
+    AnalysisDetails, AnalysisResponse, BoundingBox, CardDetectionDetails, DetectionResult,
+    FaceDetectionDetails, FaceResult, ImageDetails, LicensePlateDetectionDetails,
+    ObjectDetectionDetails, PerformanceDetails, Point, PrivacyObjectResult,
 )
+from app.context.main_subject_analyzer import MainSubjectAnalyzer
 from app.utils.image_validation import DecodedImage
 
 from .yolo_detector import YoloDetector
 from .face_detector import FaceDetector, UnavailableFaceDetector
+from .card_detector import CardDetector
+from .license_plate_detector import LicensePlateDetector
 
 
 class DetectionService:
-    def __init__(self, detector: YoloDetector, face_detector: FaceDetector, app_settings: Settings = settings) -> None:
+    def __init__(self, detector: YoloDetector, face_detector: FaceDetector, app_settings: Settings = settings,
+                 plate_detector: LicensePlateDetector | None = None, card_detector: CardDetector | None = None) -> None:
         self._detector = detector
         self._face_detector = face_detector
         self._settings = app_settings
+        self._plate_detector = plate_detector
+        self._card_detector = card_detector
+        self._subject_analyzer = MainSubjectAnalyzer(app_settings)
+
+    @staticmethod
+    def _privacy_results(raw_results, image_width: int, image_height: int) -> list[PrivacyObjectResult]:
+        results = []
+        for raw in raw_results:
+            x1, y1 = max(0, min(raw.x1, image_width)), max(0, min(raw.y1, image_height))
+            x2, y2 = max(x1, min(raw.x2, image_width)), max(y1, min(raw.y2, image_height))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            results.append(PrivacyObjectResult(
+                id=len(results) + 1, class_name=raw.class_name, confidence=round(raw.confidence, 6),
+                bounding_box=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2),
+            ))
+        return results
+
+    @staticmethod
+    def _match_plates_to_vehicles(plates: list[PrivacyObjectResult], detections: list[DetectionResult]) -> None:
+        vehicles = [item for item in detections if item.class_name in {"car", "truck", "bus", "motorcycle"}]
+        for plate in plates:
+            center_x = (plate.bounding_box.x1 + plate.bounding_box.x2) / 2
+            center_y = (plate.bounding_box.y1 + plate.bounding_box.y2) / 2
+            containing = [vehicle for vehicle in vehicles if
+                          vehicle.bounding_box.x1 <= center_x <= vehicle.bounding_box.x2 and
+                          vehicle.bounding_box.y1 <= center_y <= vehicle.bounding_box.y2]
+            if containing:
+                plate.matched_vehicle_id = min(
+                    containing,
+                    key=lambda vehicle: (vehicle.bounding_box.x2 - vehicle.bounding_box.x1)
+                    * (vehicle.bounding_box.y2 - vehicle.bounding_box.y1),
+                ).id
 
     def analyze(self, decoded: DecodedImage, filename: str) -> AnalysisResponse:
         total_started = time.perf_counter()
@@ -74,6 +112,38 @@ class DetectionService:
                 normalized_center=Point(x=center_x / decoded.width, y=center_y / decoded.height),
                 distance_from_image_center=round(distance, 8),
             ))
+        plate_started = time.perf_counter()
+        plate_error = None
+        if self._plate_detector is None:
+            raw_plates = []
+            plate_status = "unavailable"
+        else:
+            try:
+                raw_plates = self._plate_detector.detect(decoded.pixels_bgr)
+                plate_status = "completed"
+            except RuntimeError:
+                raw_plates, plate_status, plate_error = [], "error", "License plate detection failed locally."
+        plate_ms = max(0, round((time.perf_counter() - plate_started) * 1000))
+        plates = self._privacy_results(raw_plates, decoded.width, decoded.height)
+        self._match_plates_to_vehicles(plates, detections)
+
+        card_started = time.perf_counter()
+        card_error = None
+        if self._card_detector is None:
+            raw_cards = []
+            card_status = "unavailable"
+        else:
+            try:
+                raw_cards = self._card_detector.detect(decoded.pixels_bgr)
+                card_status = "completed"
+            except RuntimeError:
+                raw_cards, card_status, card_error = [], "error", "Payment card detection failed locally."
+        card_ms = max(0, round((time.perf_counter() - card_started) * 1000))
+        cards = self._privacy_results(raw_cards, decoded.width, decoded.height)
+
+        context_started = time.perf_counter()
+        main_subject = self._subject_analyzer.analyze(faces, detections)
+        context_ms = max(0, round((time.perf_counter() - context_started) * 1000))
         total_ms = max(0, round((time.perf_counter() - total_started) * 1000))
         objects = ObjectDetectionDetails(model=self._settings.yolo_model_name, detection_count=len(detections), detections=detections)
         return AnalysisResponse(
@@ -87,10 +157,27 @@ class DetectionService:
                     status="error" if face_error else "completed", detector=self._face_detector.name,
                     face_count=len(faces), faces=faces, error=face_error,
                 ),
+                main_subject=main_subject,
+                license_plate_detection=LicensePlateDetectionDetails(
+                    status=plate_status, detector=getattr(self._plate_detector, "name", "model_required"),
+                    plate_count=len(plates), plates=plates,
+                    message=plate_error or ("Dedicated license plate model required." if plate_status == "unavailable" else None),
+                    model_source=self._settings.license_plate_model_source or None,
+                    supported_classes=sorted(LicensePlateDetector.supported_classes),
+                ),
+                card_detection=CardDetectionDetails(
+                    status=card_status, detector=getattr(self._card_detector, "name", "model_required"),
+                    card_count=len(cards), cards=cards,
+                    message=card_error or ("Dedicated payment card model required." if card_status == "unavailable" else None),
+                    model_source=self._settings.card_model_source or None,
+                    supported_classes=sorted(CardDetector.supported_classes),
+                ),
             ),
             performance=PerformanceDetails(
                 inference_time_ms=object_ms, object_detection_ms=object_ms,
                 face_detection_ms=face_ms, total_analysis_ms=total_ms,
+                license_plate_detection_ms=plate_ms, card_detection_ms=card_ms,
+                context_analysis_ms=context_ms,
             ),
         )
 
@@ -102,4 +189,12 @@ def get_detection_service() -> DetectionService:
         face_detector = FaceDetector(settings.face_model_path, settings.face_confidence_threshold)
     except RuntimeError:
         face_detector = UnavailableFaceDetector()
-    return DetectionService(detector, face_detector)
+    try:
+        plate_detector = LicensePlateDetector(settings.license_plate_model_path, settings.privacy_object_confidence_threshold)
+    except RuntimeError:
+        plate_detector = None
+    try:
+        card_detector = CardDetector(settings.card_model_path, settings.privacy_object_confidence_threshold)
+    except RuntimeError:
+        card_detector = None
+    return DetectionService(detector, face_detector, settings, plate_detector, card_detector)

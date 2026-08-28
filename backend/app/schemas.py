@@ -65,6 +65,8 @@ class FaceResult(BaseModel):
     center: Point
     normalized_center: Point
     distance_from_image_center: float = Field(ge=0)
+    matched_person_id: int | None = None
+    role: Literal["main_subject", "background_face", "unclassified"] = "unclassified"
 
 
 class ImageDetails(BaseModel):
@@ -88,6 +90,48 @@ class FaceDetectionDetails(BaseModel):
     error: str | None = None
 
 
+class MainSubjectDetails(BaseModel):
+    status: Literal["identified", "uncertain", "not_found"]
+    face_id: int | None = None
+    matched_person_id: int | None = None
+    subject_score: float | None = Field(default=None, ge=0, le=1)
+    size_score: float | None = Field(default=None, ge=0, le=1)
+    center_score: float | None = Field(default=None, ge=0, le=1)
+    confidence_score: float | None = Field(default=None, ge=0, le=1)
+    person_context_score: float | None = Field(default=None, ge=0, le=1)
+    face_area_ratio: float | None = Field(default=None, ge=0, le=1)
+    score_gap: float | None = Field(default=None, ge=0, le=1)
+    reason: str
+
+
+class PrivacyObjectResult(BaseModel):
+    id: int = Field(gt=0)
+    class_name: str
+    confidence: float = Field(ge=0, le=1)
+    bounding_box: BoundingBox
+    matched_vehicle_id: int | None = None
+
+
+class LicensePlateDetectionDetails(BaseModel):
+    status: Literal["completed", "error", "unavailable"]
+    detector: str
+    plate_count: int = Field(ge=0)
+    plates: list[PrivacyObjectResult]
+    message: str | None = None
+    model_source: str | None = None
+    supported_classes: list[str] = Field(default_factory=list)
+
+
+class CardDetectionDetails(BaseModel):
+    status: Literal["completed", "error", "unavailable"]
+    detector: str
+    card_count: int = Field(ge=0)
+    cards: list[PrivacyObjectResult]
+    message: str | None = None
+    model_source: str | None = None
+    supported_classes: list[str] = Field(default_factory=list)
+
+
 class AnalysisDetails(BaseModel):
     status: Literal["completed"] = "completed"
     # Day 4 fields remain available while clients migrate to the grouped output.
@@ -96,12 +140,18 @@ class AnalysisDetails(BaseModel):
     detections: list[DetectionResult]
     object_detection: ObjectDetectionDetails
     face_detection: FaceDetectionDetails
+    main_subject: MainSubjectDetails
+    license_plate_detection: LicensePlateDetectionDetails
+    card_detection: CardDetectionDetails
 
 
 class PerformanceDetails(BaseModel):
     inference_time_ms: int = Field(ge=0)
     object_detection_ms: int = Field(ge=0)
     face_detection_ms: int = Field(ge=0)
+    license_plate_detection_ms: int = Field(ge=0)
+    card_detection_ms: int = Field(ge=0)
+    context_analysis_ms: int = Field(ge=0)
     total_analysis_ms: int = Field(ge=0)
 
 

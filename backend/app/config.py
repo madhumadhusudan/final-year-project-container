@@ -60,6 +60,12 @@ class Settings:
     subject_single_threshold: float = 0.45
     subject_score_threshold: float = 0.60
     subject_ambiguity_margin: float = 0.12
+    ocr_languages: tuple[str, ...] = tuple(
+        language.strip() for language in os.getenv("OCR_LANGUAGES", "en").split(",") if language.strip()
+    )
+    ocr_model_directory: Path = Path(
+        os.getenv("OCR_MODEL_DIRECTORY", str(BACKEND_DIR / "models" / "easyocr"))
+    )
 
 
 settings = Settings()

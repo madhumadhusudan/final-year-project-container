@@ -12,6 +12,9 @@ function ResultsPanel({ analysisStatus, hasImage, result, error }) {
   const plates = plateDetection?.plates || []
   const cards = cardDetection?.cards || []
   const backgroundFaces = faces.filter((face) => face.role === 'background_face')
+  const ocr = result?.analysis?.ocr
+  const sensitiveText = result?.analysis?.sensitive_text
+  const sensitiveItems = sensitiveText?.items || []
   return (
     <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="results-title">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-teal-700">Step 2 of 2</p><h3 id="results-title" className="mt-1 text-lg font-bold text-slate-950">Detection results</h3></div><p className="text-sm text-slate-500">{hasResult ? `Objects: ${result.performance.object_detection_ms} ms · Faces: ${result.performance.face_detection_ms} ms` : analysisStatus === 'analyzing' ? 'Running local detection...' : 'No analysis results yet'}</p></div>
@@ -31,12 +34,17 @@ function ResultsPanel({ analysisStatus, hasImage, result, error }) {
           {mainSubject?.status === 'not_found' && <p className="mt-2 text-sm font-semibold text-slate-700">No main subject found.</p>}
           {backgroundFaces.length > 0 && <p className="mt-3 text-sm font-semibold text-slate-700">Background faces: {backgroundFaces.map((face) => `Face ${face.face_id}`).join(', ')}</p>}
         </section>
-        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-600">Privacy-Sensitive Elements</p><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-slate-500">Faces</dt><dd className="text-lg font-bold">{faces.length}</dd></div><div><dt className="text-slate-500">Background Faces</dt><dd className="text-lg font-bold">{backgroundFaces.length}</dd></div><div><dt className="text-slate-500">License Plates</dt><dd className="text-lg font-bold">{plates.length}</dd></div><div><dt className="text-slate-500">Payment Cards</dt><dd className="text-lg font-bold">{cards.length}</dd></div></dl></section>
+        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-600">Privacy-Sensitive Elements</p><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-slate-500">Faces</dt><dd className="text-lg font-bold">{faces.length}</dd></div><div><dt className="text-slate-500">Background Faces</dt><dd className="text-lg font-bold">{backgroundFaces.length}</dd></div><div><dt className="text-slate-500">License Plates</dt><dd className="text-lg font-bold">{plates.length}</dd></div><div><dt className="text-slate-500">Payment Cards</dt><dd className="text-lg font-bold">{cards.length}</dd></div><div><dt className="text-slate-500">Sensitive Text</dt><dd className="text-lg font-bold">{sensitiveItems.length}</dd></div></dl></section>
       </div>}
       {hasResult && <div className="mt-7 grid gap-5 border-t border-slate-200 pt-6 lg:grid-cols-2">
         <PrivacyDetectorSection title="License Plates Detected" noun="License Plate" module={plateDetection} items={plates} />
         <PrivacyDetectorSection title="Payment Cards Detected" noun="Card" module={cardDetection} items={cards} />
       </div>}
+      {hasResult && <section className="mt-7 border-t border-slate-200 pt-6"><div className="flex items-center justify-between gap-3"><div><h3 className="text-lg font-bold text-slate-950">Sensitive Text</h3><p className="mt-1 text-sm text-slate-500">{ocr?.text_count || 0} OCR regions checked locally</p></div><span className="rounded-full bg-rose-50 px-3 py-1 text-sm font-bold text-rose-800">{sensitiveItems.length}</span></div>
+        {sensitiveText?.status !== 'completed' && <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">{sensitiveText?.message || 'OCR is unavailable.'}</p>}
+        {sensitiveText?.status === 'completed' && sensitiveItems.length === 0 && <p className="mt-4 rounded-xl bg-slate-50 p-4 text-center text-sm font-semibold text-slate-700">No sensitive text detected.</p>}
+        {sensitiveItems.length > 0 && <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{sensitiveItems.map((item) => <article key={item.id} className="rounded-xl border border-rose-100 bg-rose-50/60 p-4"><div className="flex items-start justify-between gap-3"><p className="font-bold text-slate-950">{formatClassName(item.type)}</p><span className="text-sm font-bold text-rose-800">{formatConfidence(item.confidence)}</span></div><p className="mt-2 font-mono text-sm font-bold text-slate-800">{item.masked_value}</p><p className="mt-2 text-xs leading-5 text-slate-600">{item.reason}</p></article>)}</div>}
+      </section>}
     </section>
   )
 }

@@ -132,6 +132,45 @@ class CardDetectionDetails(BaseModel):
     supported_classes: list[str] = Field(default_factory=list)
 
 
+class OCRTextResult(BaseModel):
+    text_id: int = Field(gt=0)
+    raw_text: str
+    normalized_text: str
+    confidence: float = Field(ge=0, le=1)
+    bounding_box: BoundingBox
+
+
+class OCRDetails(BaseModel):
+    status: Literal["completed", "error", "unavailable"]
+    engine: str
+    languages: list[str]
+    text_count: int = Field(ge=0)
+    texts: list[OCRTextResult]
+    message: str | None = None
+
+
+class SensitiveTextResult(BaseModel):
+    id: int = Field(gt=0)
+    text_id: int = Field(gt=0)
+    type: Literal[
+        "phone_number", "email", "url", "possible_address", "pincode",
+        "payment_card_number", "possible_expiry_date", "license_plate_text",
+        "aadhaar_like_number", "pan_like_number",
+    ]
+    masked_value: str
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+    bounding_box: BoundingBox
+    luhn_valid: bool | None = None
+
+
+class SensitiveTextDetails(BaseModel):
+    status: Literal["completed", "error", "unavailable"]
+    count: int = Field(ge=0)
+    items: list[SensitiveTextResult]
+    message: str | None = None
+
+
 class AnalysisDetails(BaseModel):
     status: Literal["completed"] = "completed"
     # Day 4 fields remain available while clients migrate to the grouped output.
@@ -143,6 +182,8 @@ class AnalysisDetails(BaseModel):
     main_subject: MainSubjectDetails
     license_plate_detection: LicensePlateDetectionDetails
     card_detection: CardDetectionDetails
+    ocr: OCRDetails
+    sensitive_text: SensitiveTextDetails
 
 
 class PerformanceDetails(BaseModel):
@@ -152,6 +193,8 @@ class PerformanceDetails(BaseModel):
     license_plate_detection_ms: int = Field(ge=0)
     card_detection_ms: int = Field(ge=0)
     context_analysis_ms: int = Field(ge=0)
+    ocr_detection_ms: int = Field(ge=0)
+    sensitive_text_analysis_ms: int = Field(ge=0)
     total_analysis_ms: int = Field(ge=0)
 
 

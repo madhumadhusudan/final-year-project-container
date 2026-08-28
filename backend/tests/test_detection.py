@@ -12,6 +12,7 @@ from app.detection.service import DetectionService, get_detection_service
 from app.detection.face_detector import RawFace
 from app.detection.face_detector import FaceDetector
 from app.detection.privacy_object_detector import RawPrivacyObject
+from app.ocr.ocr_service import RawOCRText
 from app.schemas import RawDetection
 from app.utils.image_validation import DecodedImage
 from main import app
@@ -48,6 +49,19 @@ class StaticPrivacyDetector:
     def detect(self, image_bgr: np.ndarray) -> list[RawPrivacyObject]:
         if self.fails:
             raise RuntimeError("private detector error")
+        return self.results
+
+
+class StaticOCRService:
+    name = "test_ocr"
+
+    def __init__(self, results: list[RawOCRText] | None = None, fails: bool = False) -> None:
+        self.results = results or []
+        self.fails = fails
+
+    def extract_text(self, image_bgr: np.ndarray) -> list[RawOCRText]:
+        if self.fails:
+            raise RuntimeError("private OCR detail")
         return self.results
 
 
@@ -166,6 +180,27 @@ class DetectionServiceTests(unittest.TestCase):
         self.assertEqual(response.analysis.license_plate_detection.status, "error")
         self.assertEqual(response.analysis.card_detection.status, "unavailable")
         self.assertNotIn("private", response.analysis.license_plate_detection.message)
+
+    def test_ocr_and_sensitive_text_are_separate_and_boxes_are_clipped(self) -> None:
+        ocr = StaticOCRService([RawOCRText("Call 9876543210", "Call 9876543210", 0.93, -5, 10, 130, 40)])
+        response = DetectionService(
+            StaticDetector([]), StaticFaceDetector(), test_settings(), None, None, ocr
+        ).analyze(DecodedImage(np.zeros((80, 120, 3), dtype=np.uint8), 120, 80, "PNG"), "text.png")
+        self.assertEqual(response.analysis.ocr.status, "completed")
+        self.assertEqual(response.analysis.ocr.text_count, 1)
+        self.assertEqual(response.analysis.ocr.texts[0].raw_text, "Call 9876543210")
+        sensitive = response.analysis.sensitive_text.items[0]
+        self.assertEqual(sensitive.type, "phone_number")
+        self.assertEqual(sensitive.masked_value, "******3210")
+        self.assertEqual(sensitive.bounding_box.model_dump(), {"x1": 0, "y1": 10, "x2": 120, "y2": 40})
+
+    def test_ocr_failure_is_not_reported_as_zero_success(self) -> None:
+        response = DetectionService(
+            StaticDetector([]), StaticFaceDetector(), test_settings(), None, None, StaticOCRService(fails=True)
+        ).analyze(DecodedImage(np.zeros((80, 120, 3), dtype=np.uint8), 120, 80, "PNG"), "text.png")
+        self.assertEqual(response.analysis.ocr.status, "error")
+        self.assertEqual(response.analysis.sensitive_text.status, "error")
+        self.assertNotIn("private", response.analysis.ocr.message)
 
 
 class AnalysisApiTests(unittest.TestCase):

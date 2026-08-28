@@ -9,9 +9,12 @@ from app.config import Settings, settings
 from app.schemas import (
     AnalysisDetails, AnalysisResponse, BoundingBox, CardDetectionDetails, DetectionResult,
     FaceDetectionDetails, FaceResult, ImageDetails, LicensePlateDetectionDetails,
-    ObjectDetectionDetails, PerformanceDetails, Point, PrivacyObjectResult,
+    ObjectDetectionDetails, OCRDetails, OCRTextResult, PerformanceDetails, Point,
+    PrivacyObjectResult, SensitiveTextDetails,
 )
 from app.context.main_subject_analyzer import MainSubjectAnalyzer
+from app.ocr.ocr_service import OCRService, UnavailableOCRService
+from app.privacy.sensitive_text_classifier import SensitiveTextClassifier
 from app.utils.image_validation import DecodedImage
 
 from .yolo_detector import YoloDetector
@@ -22,13 +25,16 @@ from .license_plate_detector import LicensePlateDetector
 
 class DetectionService:
     def __init__(self, detector: YoloDetector, face_detector: FaceDetector, app_settings: Settings = settings,
-                 plate_detector: LicensePlateDetector | None = None, card_detector: CardDetector | None = None) -> None:
+                 plate_detector: LicensePlateDetector | None = None, card_detector: CardDetector | None = None,
+                 ocr_service: OCRService | UnavailableOCRService | None = None) -> None:
         self._detector = detector
         self._face_detector = face_detector
         self._settings = app_settings
         self._plate_detector = plate_detector
         self._card_detector = card_detector
         self._subject_analyzer = MainSubjectAnalyzer(app_settings)
+        self._ocr_service = ocr_service or UnavailableOCRService()
+        self._sensitive_text_classifier = SensitiveTextClassifier()
 
     @staticmethod
     def _privacy_results(raw_results, image_width: int, image_height: int) -> list[PrivacyObjectResult]:
@@ -144,6 +150,29 @@ class DetectionService:
         context_started = time.perf_counter()
         main_subject = self._subject_analyzer.analyze(faces, detections)
         context_ms = max(0, round((time.perf_counter() - context_started) * 1000))
+
+        ocr_started = time.perf_counter()
+        try:
+            raw_texts = self._ocr_service.extract_text(decoded.pixels_bgr)
+            ocr_status, ocr_error = "completed", None
+        except RuntimeError:
+            raw_texts = []
+            ocr_status = "unavailable" if self._ocr_service.name.endswith("unavailable") else "error"
+            ocr_error = "The local OCR engine is unavailable." if ocr_status == "unavailable" else "Local OCR failed for this image."
+        ocr_ms = max(0, round((time.perf_counter() - ocr_started) * 1000))
+        texts = []
+        for raw in raw_texts:
+            x1, y1 = max(0, min(raw.x1, decoded.width)), max(0, min(raw.y1, decoded.height))
+            x2, y2 = max(x1, min(raw.x2, decoded.width)), max(y1, min(raw.y2, decoded.height))
+            if x2 <= x1 or y2 <= y1 or not 0 <= raw.confidence <= 1:
+                continue
+            texts.append(OCRTextResult(
+                text_id=len(texts) + 1, raw_text=raw.raw_text, normalized_text=raw.normalized_text,
+                confidence=round(raw.confidence, 6), bounding_box=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2),
+            ))
+        sensitive_started = time.perf_counter()
+        sensitive_items = self._sensitive_text_classifier.classify(texts, plates, cards) if ocr_status == "completed" else []
+        sensitive_ms = max(0, round((time.perf_counter() - sensitive_started) * 1000))
         total_ms = max(0, round((time.perf_counter() - total_started) * 1000))
         objects = ObjectDetectionDetails(model=self._settings.yolo_model_name, detection_count=len(detections), detections=detections)
         return AnalysisResponse(
@@ -172,12 +201,20 @@ class DetectionService:
                     model_source=self._settings.card_model_source or None,
                     supported_classes=sorted(CardDetector.supported_classes),
                 ),
+                ocr=OCRDetails(
+                    status=ocr_status, engine=self._ocr_service.name, languages=list(self._settings.ocr_languages),
+                    text_count=len(texts), texts=texts, message=ocr_error,
+                ),
+                sensitive_text=SensitiveTextDetails(
+                    status=ocr_status, count=len(sensitive_items), items=sensitive_items, message=ocr_error,
+                ),
             ),
             performance=PerformanceDetails(
                 inference_time_ms=object_ms, object_detection_ms=object_ms,
                 face_detection_ms=face_ms, total_analysis_ms=total_ms,
                 license_plate_detection_ms=plate_ms, card_detection_ms=card_ms,
                 context_analysis_ms=context_ms,
+                ocr_detection_ms=ocr_ms, sensitive_text_analysis_ms=sensitive_ms,
             ),
         )
 
@@ -197,4 +234,8 @@ def get_detection_service() -> DetectionService:
         card_detector = CardDetector(settings.card_model_path, settings.privacy_object_confidence_threshold)
     except RuntimeError:
         card_detector = None
-    return DetectionService(detector, face_detector, settings, plate_detector, card_detector)
+    try:
+        ocr_service = OCRService(list(settings.ocr_languages), settings.ocr_model_directory)
+    except RuntimeError:
+        ocr_service = UnavailableOCRService()
+    return DetectionService(detector, face_detector, settings, plate_detector, card_detector, ocr_service)

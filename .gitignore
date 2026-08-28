@@ -29,6 +29,7 @@ backend/models/*
 !backend/models/.gitkeep
 !backend/models/face_detection_yunet_2023mar.onnx
 !backend/models/README.md
+!backend/models/card_detector.manifest.json
 
 # IDE, OS, and tooling caches
 .vscode/

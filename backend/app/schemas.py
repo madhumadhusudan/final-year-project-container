@@ -112,6 +112,24 @@ class PrivacyObjectResult(BaseModel):
     matched_vehicle_id: int | None = None
 
 
+class CardResult(PrivacyObjectResult):
+    card_id: int | None = Field(default=None, gt=0)
+
+
+class DetectorDiagnostics(BaseModel):
+    loaded: bool
+    model_name: str
+    model_class_names: list[str]
+    inference_image_size: int = Field(gt=0)
+    confidence_threshold: float = Field(ge=0, le=1)
+    raw_detection_count: int = Field(ge=0)
+    accepted_detection_count: int = Field(ge=0)
+    inference_time_ms: int = Field(ge=0)
+    tile_size: int | None = Field(default=None, gt=0)
+    tile_inference_image_size: int | None = Field(default=None, gt=0)
+    tiles_processed: int = Field(default=1, gt=0)
+
+
 class LicensePlateDetectionDetails(BaseModel):
     status: Literal["completed", "error", "unavailable"]
     detector: str
@@ -126,10 +144,11 @@ class CardDetectionDetails(BaseModel):
     status: Literal["completed", "error", "unavailable"]
     detector: str
     card_count: int = Field(ge=0)
-    cards: list[PrivacyObjectResult]
+    cards: list[CardResult]
     message: str | None = None
     model_source: str | None = None
     supported_classes: list[str] = Field(default_factory=list)
+    diagnostics: DetectorDiagnostics | None = None
 
 
 class OCRTextResult(BaseModel):

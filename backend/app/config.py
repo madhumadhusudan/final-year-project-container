@@ -29,6 +29,28 @@ def _face_confidence_setting() -> float:
     return value
 
 
+def _bounded_float_setting(name: str, default: str) -> float:
+    raw_value = os.getenv(name, default)
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if not 0 <= value <= 1:
+        raise ValueError(f"{name} must be between 0 and 1")
+    return value
+
+
+def _image_size_setting(name: str, default: str) -> int:
+    raw_value = os.getenv(name, default)
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not 320 <= value <= 2048:
+        raise ValueError(f"{name} must be between 320 and 2048")
+    return value
+
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -51,8 +73,16 @@ class Settings:
         os.getenv("CARD_MODEL_PATH", str(BACKEND_DIR / "models" / "card_detector.pt"))
     )
     privacy_object_confidence_threshold: float = float(os.getenv("PRIVACY_OBJECT_CONFIDENCE_THRESHOLD", "0.35"))
+    card_confidence_threshold: float = _bounded_float_setting("CARD_CONFIDENCE_THRESHOLD", "0.25")
+    card_inference_image_size: int = _image_size_setting("CARD_INFERENCE_IMAGE_SIZE", "960")
+    card_tile_size: int = _image_size_setting("CARD_TILE_SIZE", "640")
+    card_tile_inference_image_size: int = _image_size_setting("CARD_TILE_INFERENCE_IMAGE_SIZE", "640")
+    card_tile_overlap: float = _bounded_float_setting("CARD_TILE_OVERLAP", "0.40")
     license_plate_model_source: str = os.getenv("LICENSE_PLATE_MODEL_SOURCE", "")
-    card_model_source: str = os.getenv("CARD_MODEL_SOURCE", "")
+    card_model_source: str = os.getenv(
+        "CARD_MODEL_SOURCE", "https://huggingface.co/lambdaWalker/creditCardDetection"
+    )
+    app_environment: str = os.getenv("APP_ENV", "development").strip().lower()
     subject_size_weight: float = 0.45
     subject_center_weight: float = 0.25
     subject_confidence_weight: float = 0.15

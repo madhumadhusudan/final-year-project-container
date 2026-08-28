@@ -1,0 +1,16 @@
+{
+  "model_file": "card_detector.pt",
+  "model_type": "Ultralytics YOLOv8n object detector",
+  "source": "https://huggingface.co/lambdaWalker/creditCardDetection/blob/main/model.pt",
+  "license": "Apache-2.0",
+  "sha256": "3bac7e8d7f2a7312b93b794a4712c1c7cf2feff36f74a8e83e770e1ce378e229",
+  "verified_classes": [
+    "creditCardFront",
+    "creditCardBack",
+    "text",
+    "chip",
+    "band"
+  ],
+  "training_dataset": "https://huggingface.co/datasets/lambdaWalker/creditCardDetectionDS",
+  "notes": "The binary is intentionally git-ignored. Install it at backend/models/card_detector.pt and verify this digest before use."
+}

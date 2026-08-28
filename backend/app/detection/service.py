@@ -7,7 +7,8 @@ from functools import lru_cache
 
 from app.config import Settings, settings
 from app.schemas import (
-    AnalysisDetails, AnalysisResponse, BoundingBox, CardDetectionDetails, DetectionResult,
+    AnalysisDetails, AnalysisResponse, BoundingBox, CardDetectionDetails, CardResult, DetectionResult,
+    DetectorDiagnostics,
     FaceDetectionDetails, FaceResult, ImageDetails, LicensePlateDetectionDetails,
     ObjectDetectionDetails, OCRDetails, OCRTextResult, PerformanceDetails, Point,
     PrivacyObjectResult, SensitiveTextDetails,
@@ -37,16 +38,21 @@ class DetectionService:
         self._sensitive_text_classifier = SensitiveTextClassifier()
 
     @staticmethod
-    def _privacy_results(raw_results, image_width: int, image_height: int) -> list[PrivacyObjectResult]:
+    def _privacy_results(
+        raw_results, image_width: int, image_height: int, *, cards: bool = False
+    ) -> list[PrivacyObjectResult]:
         results = []
         for raw in raw_results:
             x1, y1 = max(0, min(raw.x1, image_width)), max(0, min(raw.y1, image_height))
             x2, y2 = max(x1, min(raw.x2, image_width)), max(y1, min(raw.y2, image_height))
             if x2 <= x1 or y2 <= y1:
                 continue
-            results.append(PrivacyObjectResult(
-                id=len(results) + 1, class_name=raw.class_name, confidence=round(raw.confidence, 6),
-                bounding_box=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2),
+            result_id = len(results) + 1
+            result_type = CardResult if cards else PrivacyObjectResult
+            extra = {"card_id": result_id} if cards else {}
+            results.append(result_type(
+                id=result_id, class_name=raw.class_name, confidence=round(raw.confidence, 6),
+                bounding_box=BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2), **extra,
             ))
         return results
 
@@ -135,17 +141,44 @@ class DetectionService:
 
         card_started = time.perf_counter()
         card_error = None
+        card_run = None
         if self._card_detector is None:
             raw_cards = []
             card_status = "unavailable"
         else:
             try:
-                raw_cards = self._card_detector.detect(decoded.pixels_bgr)
+                if hasattr(self._card_detector, "detect_with_diagnostics"):
+                    card_run = self._card_detector.detect_with_diagnostics(decoded.pixels_bgr)
+                    raw_cards = card_run.detections
+                else:
+                    raw_cards = self._card_detector.detect(decoded.pixels_bgr)
                 card_status = "completed"
             except RuntimeError:
                 raw_cards, card_status, card_error = [], "error", "Payment card detection failed locally."
         card_ms = max(0, round((time.perf_counter() - card_started) * 1000))
-        cards = self._privacy_results(raw_cards, decoded.width, decoded.height)
+        cards = self._privacy_results(raw_cards, decoded.width, decoded.height, cards=True)
+        card_diagnostics = None
+        if self._settings.app_environment == "development":
+            card_diagnostics = DetectorDiagnostics(
+                loaded=self._card_detector is not None,
+                model_name=getattr(self._card_detector, "model_name", self._settings.card_model_path.name),
+                model_class_names=getattr(self._card_detector, "model_class_names", []),
+                inference_image_size=getattr(
+                    self._card_detector, "inference_image_size", self._settings.card_inference_image_size
+                ),
+                confidence_threshold=getattr(
+                    self._card_detector, "confidence_threshold", self._settings.card_confidence_threshold
+                ),
+                raw_detection_count=getattr(card_run, "raw_detection_count", len(raw_cards)),
+                accepted_detection_count=len(cards),
+                inference_time_ms=getattr(card_run, "inference_time_ms", card_ms),
+                tile_size=getattr(self._card_detector, "tile_size", self._settings.card_tile_size),
+                tile_inference_image_size=getattr(
+                    self._card_detector, "tile_inference_image_size",
+                    self._settings.card_tile_inference_image_size,
+                ),
+                tiles_processed=getattr(card_run, "tiles_processed", 1),
+            )
 
         context_started = time.perf_counter()
         main_subject = self._subject_analyzer.analyze(faces, detections)
@@ -200,6 +233,7 @@ class DetectionService:
                     message=card_error or ("Dedicated payment card model required." if card_status == "unavailable" else None),
                     model_source=self._settings.card_model_source or None,
                     supported_classes=sorted(CardDetector.supported_classes),
+                    diagnostics=card_diagnostics,
                 ),
                 ocr=OCRDetails(
                     status=ocr_status, engine=self._ocr_service.name, languages=list(self._settings.ocr_languages),
@@ -231,7 +265,11 @@ def get_detection_service() -> DetectionService:
     except RuntimeError:
         plate_detector = None
     try:
-        card_detector = CardDetector(settings.card_model_path, settings.privacy_object_confidence_threshold)
+        card_detector = CardDetector(
+            settings.card_model_path, settings.card_confidence_threshold,
+            settings.card_inference_image_size, settings.card_tile_size, settings.card_tile_overlap,
+            settings.card_tile_inference_image_size,
+        )
     except RuntimeError:
         card_detector = None
     try:

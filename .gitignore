@@ -27,6 +27,7 @@ backend/outputs/*
 *.engine
 backend/models/*
 !backend/models/.gitkeep
+!backend/models/face_detection_yunet_2023mar.onnx
 
 # IDE, OS, and tooling caches
 .vscode/
@@ -35,4 +36,3 @@ backend/models/*
 Thumbs.db
 *.log
 .eslintcache
-

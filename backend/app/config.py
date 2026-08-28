@@ -18,6 +18,17 @@ def _confidence_setting() -> float:
     return value
 
 
+def _face_confidence_setting() -> float:
+    raw_value = os.getenv("FACE_CONFIDENCE_THRESHOLD", "0.75")
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise ValueError("FACE_CONFIDENCE_THRESHOLD must be a number") from exc
+    if not 0 <= value <= 1:
+        raise ValueError("FACE_CONFIDENCE_THRESHOLD must be between 0 and 1")
+    return value
+
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -28,6 +39,10 @@ class Settings:
     yolo_model_name: str = os.getenv("YOLO_MODEL_NAME", "yolov8n")
     yolo_weights_path: Path = Path(
         os.getenv("YOLO_WEIGHTS_PATH", str(BACKEND_DIR / "models" / "yolov8n.pt"))
+    )
+    face_confidence_threshold: float = _face_confidence_setting()
+    face_model_path: Path = Path(
+        os.getenv("FACE_MODEL_PATH", str(BACKEND_DIR / "models" / "face_detection_yunet_2023mar.onnx"))
     )
 
 

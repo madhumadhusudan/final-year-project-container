@@ -6,7 +6,8 @@ import { RefreshIcon, SparkIcon, TrashIcon } from './Icons.jsx'
 
 function AnalysisPanel({ selectedFile, previewUrl, imageMetadata, uploadError, analysisStatus, result, onFileSelect, onRemove, onImageLoaded, onImageError, onAnalyze }) {
   const replacementInputRef = useRef(null)
-  const [showDetections, setShowDetections] = useState(true)
+  const [showObjects, setShowObjects] = useState(true)
+  const [showFaces, setShowFaces] = useState(true)
 
   function handleReplacement(event) {
     const file = event.target.files?.[0]
@@ -15,12 +16,16 @@ function AnalysisPanel({ selectedFile, previewUrl, imageMetadata, uploadError, a
   }
 
   const detections = result?.analysis?.detections || []
+  const faces = result?.analysis?.face_detection?.faces || []
   return (
     <article className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="mb-5 flex items-start justify-between gap-4"><div><h3 className="text-lg font-bold text-slate-950">Image analysis</h3><p className="mt-1 text-sm leading-6 text-slate-600">Select one image for local YOLOv8 object detection.</p></div><span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Step 1 of 2</span></div>
       {!selectedFile ? <ImageUploader onFileSelect={onFileSelect} error={uploadError} /> : <div>
-        <ImagePreview previewUrl={previewUrl} filename={selectedFile.name} image={result?.image} detections={detections} showDetections={showDetections} isAnalyzing={analysisStatus === 'analyzing'} onLoaded={onImageLoaded} onError={onImageError} />
-        {detections.length > 0 && <label className="mt-4 inline-flex min-h-11 items-center gap-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={showDetections} onChange={(event) => setShowDetections(event.target.checked)} className="h-5 w-5 accent-teal-700" /> Show detections</label>}
+        <ImagePreview previewUrl={previewUrl} filename={selectedFile.name} image={result?.image} detections={detections} faces={faces} showObjects={showObjects} showFaces={showFaces} isAnalyzing={analysisStatus === 'analyzing'} onLoaded={onImageLoaded} onError={onImageError} />
+        {(detections.length > 0 || faces.length > 0) && <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1">
+          <label className="inline-flex min-h-11 items-center gap-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={showObjects} onChange={(event) => setShowObjects(event.target.checked)} className="h-5 w-5 accent-cyan-600" /> Show Objects</label>
+          <label className="inline-flex min-h-11 items-center gap-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={showFaces} onChange={(event) => setShowFaces(event.target.checked)} className="h-5 w-5 accent-fuchsia-600" /> Show Faces</label>
+        </div>}
         {uploadError && <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-800" role="alert">{uploadError}</p>}
         {imageMetadata && <ImageInfo metadata={imageMetadata} />}
         <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">

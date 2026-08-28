@@ -49,6 +49,24 @@ class DetectionResult(BaseModel):
     bounding_box: BoundingBox
 
 
+class Point(BaseModel):
+    x: float
+    y: float
+
+
+class FaceResult(BaseModel):
+    face_id: int = Field(gt=0)
+    confidence: float = Field(ge=0, le=1)
+    bounding_box: BoundingBox
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    area: int = Field(gt=0)
+    area_ratio: float = Field(ge=0, le=1)
+    center: Point
+    normalized_center: Point
+    distance_from_image_center: float = Field(ge=0)
+
+
 class ImageDetails(BaseModel):
     filename: str
     width: int = Field(gt=0)
@@ -56,15 +74,35 @@ class ImageDetails(BaseModel):
     format: str
 
 
-class AnalysisDetails(BaseModel):
-    status: Literal["completed"] = "completed"
+class ObjectDetectionDetails(BaseModel):
     model: str
     detection_count: int = Field(ge=0)
     detections: list[DetectionResult]
 
 
+class FaceDetectionDetails(BaseModel):
+    status: Literal["completed", "error"] = "completed"
+    detector: str
+    face_count: int = Field(ge=0)
+    faces: list[FaceResult]
+    error: str | None = None
+
+
+class AnalysisDetails(BaseModel):
+    status: Literal["completed"] = "completed"
+    # Day 4 fields remain available while clients migrate to the grouped output.
+    model: str
+    detection_count: int = Field(ge=0)
+    detections: list[DetectionResult]
+    object_detection: ObjectDetectionDetails
+    face_detection: FaceDetectionDetails
+
+
 class PerformanceDetails(BaseModel):
     inference_time_ms: int = Field(ge=0)
+    object_detection_ms: int = Field(ge=0)
+    face_detection_ms: int = Field(ge=0)
+    total_analysis_ms: int = Field(ge=0)
 
 
 class AnalysisResponse(BaseModel):

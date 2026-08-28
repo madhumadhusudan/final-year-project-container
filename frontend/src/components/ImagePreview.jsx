@@ -1,7 +1,7 @@
 import { ImageIcon } from './Icons.jsx'
 import { formatClassName, formatConfidence, getBoundingBoxStyle } from '../utils/detection.js'
 
-function ImagePreview({ previewUrl, filename, image, detections = [], showDetections, isAnalyzing = false, onLoaded, onError }) {
+function ImagePreview({ previewUrl, filename, image, detections = [], faces = [], showObjects, showFaces, isAnalyzing = false, onLoaded, onError }) {
   if (!previewUrl) {
     return <div className="grid min-h-72 place-items-center rounded-2xl bg-slate-100 text-slate-400" role="status"><div className="text-center"><ImageIcon className="mx-auto h-8 w-8" /><p className="mt-2 text-sm font-medium">Preparing image preview...</p></div></div>
   }
@@ -10,12 +10,17 @@ function ImagePreview({ previewUrl, filename, image, detections = [], showDetect
     <div className="flex min-h-72 max-h-[34rem] items-center justify-center overflow-hidden rounded-2xl bg-slate-100 ring-1 ring-slate-200">
       <div className="relative inline-flex max-h-[34rem] max-w-full">
         <img src={previewUrl} alt={`Preview of ${filename}`} className="block max-h-[34rem] max-w-full object-contain" onLoad={(event) => onLoaded({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={onError} />
-        {showDetections && detections.map((detection) => (
-          <div key={detection.id} className="pointer-events-none absolute border-2 border-cyan-400 bg-cyan-400/10" style={getBoundingBoxStyle(detection.bounding_box, image?.width, image?.height)} aria-hidden="true">
+        {showObjects && detections.map((detection) => (
+          <div key={`object-${detection.id}`} className="pointer-events-none absolute border-2 border-cyan-400 bg-cyan-400/10" style={getBoundingBoxStyle(detection.bounding_box, image?.width, image?.height)} aria-hidden="true">
             <span className="absolute left-0 top-0 max-w-[12rem] -translate-y-px whitespace-nowrap rounded-br bg-cyan-400 px-1.5 py-1 text-[10px] font-bold leading-none text-slate-950 shadow-sm">{formatClassName(detection.class_name)} {formatConfidence(detection.confidence)}</span>
           </div>
         ))}
-        {isAnalyzing && <div className="absolute inset-0 grid place-items-center bg-slate-950/55 px-5 text-center text-white" role="status" aria-live="polite"><div><span className="mx-auto block h-9 w-9 animate-spin rounded-full border-4 border-white/30 border-t-white" /><p className="mt-3 text-sm font-bold">Running object detection...</p><p className="mt-1 text-xs text-white/75">Processing locally with YOLOv8</p></div></div>}
+        {showFaces && faces.map((face) => (
+          <div key={`face-${face.face_id}`} className="pointer-events-none absolute border-2 border-fuchsia-500 bg-fuchsia-500/10" style={getBoundingBoxStyle(face.bounding_box, image?.width, image?.height)} aria-hidden="true">
+            <span className="absolute right-0 top-0 max-w-[12rem] -translate-y-px whitespace-nowrap rounded-bl bg-fuchsia-500 px-1.5 py-1 text-[10px] font-bold leading-none text-white shadow-sm">Face {face.face_id} {formatConfidence(face.confidence)}</span>
+          </div>
+        ))}
+        {isAnalyzing && <div className="absolute inset-0 grid place-items-center bg-slate-950/55 px-5 text-center text-white" role="status" aria-live="polite"><div><span className="mx-auto block h-9 w-9 animate-spin rounded-full border-4 border-white/30 border-t-white" /><p className="mt-3 text-sm font-bold">Running privacy detection...</p><p className="mt-1 text-xs text-white/75">Processing objects and faces locally</p></div></div>}
       </div>
     </div>
   )

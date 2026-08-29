@@ -190,6 +190,44 @@ class SensitiveTextDetails(BaseModel):
     message: str | None = None
 
 
+RiskLevel = Literal["LOW", "MODERATE", "ELEVATED", "HIGH", "CRITICAL"]
+
+
+class RiskBreakdown(BaseModel):
+    background_faces: int = Field(default=0, ge=0)
+    license_plates: int = Field(default=0, ge=0)
+    payment_cards: int = Field(default=0, ge=0)
+    sensitive_text: int = Field(default=0, ge=0)
+    context_uncertainty: int = Field(default=0, ge=0)
+
+
+class RiskFactor(BaseModel):
+    type: str
+    category: Literal[
+        "background_faces", "license_plates", "payment_cards",
+        "sensitive_text", "context_uncertainty",
+    ]
+    severity: Literal["low", "medium", "high", "critical"]
+    contribution: float = Field(ge=0, le=100)
+    reason: str
+
+
+class RiskAssessment(BaseModel):
+    status: Literal["complete", "partial"]
+    unavailable_modules: list[str] = Field(default_factory=list)
+
+
+class PrivacyRiskDetails(BaseModel):
+    score: int = Field(ge=0, le=100)
+    level: RiskLevel
+    summary: str
+    breakdown: RiskBreakdown
+    factors: list[RiskFactor]
+    top_risks: list[str]
+    recommendations: list[str]
+    assessment: RiskAssessment
+
+
 class AnalysisDetails(BaseModel):
     status: Literal["completed"] = "completed"
     # Day 4 fields remain available while clients migrate to the grouped output.
@@ -203,6 +241,9 @@ class AnalysisDetails(BaseModel):
     card_detection: CardDetectionDetails
     ocr: OCRDetails
     sensitive_text: SensitiveTextDetails
+    # Optional on input so Day 8 analysis payloads remain valid for /protect.
+    # Every new /analyze response populates this field.
+    privacy_risk: PrivacyRiskDetails | None = None
 
 
 class PerformanceDetails(BaseModel):
@@ -242,6 +283,18 @@ class ProtectionBreakdown(BaseModel):
     sensitive_text: int = Field(default=0, ge=0)
 
 
+class RiskScoreSummary(BaseModel):
+    score: int = Field(ge=0, le=100)
+    level: RiskLevel
+
+
+class RiskReductionDetails(BaseModel):
+    before: RiskScoreSummary
+    after: RiskScoreSummary
+    reduction: int = Field(ge=0, le=100)
+    reduction_percent: float = Field(ge=0, le=100)
+
+
 class ProtectionMetadata(BaseModel):
     status: Literal["completed"] = "completed"
     method: Literal["blur", "pixelate", "blackout"]
@@ -250,3 +303,4 @@ class ProtectionMetadata(BaseModel):
     breakdown: ProtectionBreakdown
     main_subject_preserved: bool
     warnings: list[str] = Field(default_factory=list)
+    risk: RiskReductionDetails | None = None

@@ -2,7 +2,7 @@
 
 Context-aware, local image anonymization for safer social-media sharing. This B.E. final-year project detects privacy risks, identifies a likely main subject, and selectively protects only sensitive regions.
 
-> **Current status: Day 8 — Selective Privacy Anonymization**
+> **Current status: Day 9 — Explainable Privacy Risk Scoring**
 
 ## What Works
 
@@ -17,23 +17,31 @@ Context-aware, local image anonymization for safer social-media sharing. This B.
 - Main-subject face preservation, including protection from overlapping padded regions.
 - Safe fallback that protects all detected faces when the main subject is uncertain or absent.
 - Responsive Before/After comparison, real category counts, warnings, and local download.
+- Deterministic privacy risk score from 0–100 with confidence/visibility weighting, category caps, factor explanations, and detector-completeness status.
+- Original-versus-residual risk calculation from successful protection metadata, including point and percentage reduction.
 - No permanent image storage and no external image-processing APIs.
 
-## Day 8 Pipeline
+## Day 9 Pipeline
 
 ```text
 Upload and validate image
   → local object, face, plate, card, and OCR analysis
   → main-subject/context classification
+  → privacy-risk feature extraction, grouping, and deterministic scoring
   → user privacy settings
   → sanitize, clamp, pad, merge, and prioritize regions
   → selective blur / pixelate / blackout
   → restore confidently identified main-subject face
   → in-memory image encoding
-  → Before/After preview and local download
+  → residual-risk calculation from successfully protected regions
+  → Before/After preview, risk reduction, and local download
 ```
 
 `POST /analyze` returns the analysis once. `POST /protect` receives that analysis with the same original image and validates matching dimensions, so expensive detectors are not rerun. The protected image is returned directly as binary data; compact protection metadata is exposed in `X-Protection-Metadata`. No result database or permanent output file is used.
+
+The Day 9 score uses only detected privacy evidence. A confidently selected main subject adds no face risk; background/unclassified faces, plates, cards, classified sensitive text, and main-subject uncertainty do. Confidence uses the bounded multiplier `0.7 + 0.3 × confidence`. Visibility uses bounded size bands tailored to faces, plates, cards, and OCR regions. Base weights are 12 per background face, 18 per plate, 27 per payment card, 8 for context uncertainty, and 3–25 for classified text depending on type. Category caps are faces 35, plates 30, cards 35, sensitive text 60, and context 10. Final totals are clamped to 100.
+
+Related detections are grouped: readable plate OCR is a limited plate bonus, card number/expiry OCR is a limited card bonus, address and PIN code form one address exposure, and overlapping or matching masked OCR classifications are deduplicated. Missing or failed face, plate, card, or OCR modules produce a visible `partial` assessment instead of implying a comprehensive zero-risk result.
 
 Region precedence is:
 
@@ -50,7 +58,7 @@ backend/
   app/context/                 Main-subject analysis
   app/detection/               YOLO, YuNet, plate, and card detectors
   app/ocr/                     Local OCR and text normalization
-  app/privacy/                 Sensitive-text classification
+  app/privacy/                 Sensitive-text classification and privacy-risk scoring
   app/routes/                  /analyze and /protect
   app/utils/                   Secure image validation
   models/                      Local model weights; most are Git-ignored
@@ -140,7 +148,13 @@ The protection metadata header decodes to:
     "sensitive_text": 1
   },
   "main_subject_preserved": true,
-  "warnings": []
+  "warnings": [],
+  "risk": {
+    "before": { "score": 72, "level": "HIGH" },
+    "after": { "score": 7, "level": "LOW" },
+    "reduction": 65,
+    "reduction_percent": 90.3
+  }
 }
 ```
 
@@ -157,7 +171,7 @@ npm.cmd test
 npm.cmd run build
 ```
 
-Day 8 backend coverage verifies ROI-only changes, invalid boxes, padding, merging, method and strength differences, main-subject preservation, uncertain fallback, precedence, every toggle, mixed risks, zero-risk images, response metadata, format, and clean API errors. The browser flow verifies analysis gating, controls, comparison, download naming, and layouts at 375, 768, 1024, and 1440 px.
+Day 9 risk tests verify thresholds, main-subject exclusion, background-face monotonicity, confidence and visibility weighting, plate/card contributions, grouped readable data, all high-sensitivity PII types, OCR deduplication, address/PIN grouping, category and total caps, determinism, partial assessment, zero-safe reduction, and protection toggles. Day 1–8 regression tests continue to verify detection, OCR, anonymization, API behavior, and the responsive frontend build.
 
 ## Privacy and Limitations
 
@@ -167,4 +181,6 @@ Day 8 backend coverage verifies ROI-only changes, invalid boxes, padding, mergin
 - Image metadata/EXIF and PNG alpha are not retained in the current OpenCV output path.
 - Detection quality depends on local models, lighting, pose, scale, occlusion, and OCR quality.
 - Dedicated plate and payment-card detection cannot run until compatible local weights are supplied.
-- No GAN replacement, generative inpainting, authentication, database, cloud storage, publishing, video, or live-camera processing is included in Day 8.
+- Risk is a calibrated exposure indicator, not a probability of harm or a guarantee that unavailable detectors would find nothing.
+- Residual risk is derived from protection settings and successful-region metadata; detectors are intentionally not rerun on the altered image.
+- No GAN replacement, generative inpainting, authentication, database, cloud storage, publishing, video, or live-camera processing is included in Day 9.

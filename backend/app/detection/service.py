@@ -16,6 +16,7 @@ from app.schemas import (
 from app.context.main_subject_analyzer import MainSubjectAnalyzer
 from app.ocr.ocr_service import OCRService, UnavailableOCRService
 from app.privacy.sensitive_text_classifier import SensitiveTextClassifier
+from app.privacy.risk_score import PrivacyRiskEngine
 from app.utils.image_validation import DecodedImage
 
 from .yolo_detector import YoloDetector
@@ -36,6 +37,7 @@ class DetectionService:
         self._subject_analyzer = MainSubjectAnalyzer(app_settings)
         self._ocr_service = ocr_service or UnavailableOCRService()
         self._sensitive_text_classifier = SensitiveTextClassifier()
+        self._risk_engine = PrivacyRiskEngine()
 
     @staticmethod
     def _privacy_results(
@@ -208,8 +210,20 @@ class DetectionService:
         sensitive_ms = max(0, round((time.perf_counter() - sensitive_started) * 1000))
         total_ms = max(0, round((time.perf_counter() - total_started) * 1000))
         objects = ObjectDetectionDetails(model=self._settings.yolo_model_name, detection_count=len(detections), detections=detections)
+        image_details = ImageDetails(
+            filename=filename, width=decoded.width, height=decoded.height, format=decoded.format,
+        )
+        privacy_risk = self._risk_engine.calculate(
+            image_details, faces, main_subject, plates, cards, sensitive_items,
+            {
+                "face_detection": "error" if face_error else "completed",
+                "license_plate_detection": plate_status,
+                "card_detection": card_status,
+                "ocr": ocr_status,
+            },
+        )
         return AnalysisResponse(
-            image=ImageDetails(filename=filename, width=decoded.width, height=decoded.height, format=decoded.format),
+            image=image_details,
             analysis=AnalysisDetails(
                 model=self._settings.yolo_model_name,
                 detection_count=len(detections),
@@ -242,6 +256,7 @@ class DetectionService:
                 sensitive_text=SensitiveTextDetails(
                     status=ocr_status, count=len(sensitive_items), items=sensitive_items, message=ocr_error,
                 ),
+                privacy_risk=privacy_risk,
             ),
             performance=PerformanceDetails(
                 inference_time_ms=object_ms, object_detection_ms=object_ms,

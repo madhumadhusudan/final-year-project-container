@@ -193,6 +193,8 @@ class DetectionServiceTests(unittest.TestCase):
         self.assertEqual(sensitive.type, "phone_number")
         self.assertEqual(sensitive.masked_value, "******3210")
         self.assertEqual(sensitive.bounding_box.model_dump(), {"x1": 0, "y1": 10, "x2": 120, "y2": 40})
+        self.assertGreater(response.analysis.privacy_risk.score, 0)
+        self.assertEqual(response.analysis.privacy_risk.breakdown.sensitive_text, response.analysis.privacy_risk.score)
 
     def test_ocr_failure_is_not_reported_as_zero_success(self) -> None:
         response = DetectionService(
@@ -227,6 +229,10 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertIn("total_analysis_ms", payload["performance"])
         self.assertEqual(payload["analysis"]["license_plate_detection"]["status"], "unavailable")
         self.assertEqual(payload["analysis"]["card_detection"]["status"], "unavailable")
+        risk = payload["analysis"]["privacy_risk"]
+        self.assertEqual(risk["score"], 0)
+        self.assertEqual(risk["assessment"]["status"], "partial")
+        self.assertIn("card_detection", risk["assessment"]["unavailable_modules"])
 
     def test_compatibility_endpoint_still_works(self) -> None:
         response = self.client.post("/api/v1/analyze/image", files={"image": ("image.png", encoded_png(), "image/png")})

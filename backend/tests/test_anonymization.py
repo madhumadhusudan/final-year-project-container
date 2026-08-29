@@ -219,6 +219,9 @@ class ProtectionApiTests(unittest.TestCase):
         metadata = json.loads(unquote(response.headers["x-protection-metadata"]))
         self.assertEqual(metadata["regions_protected"], 1)
         self.assertEqual(metadata["breakdown"]["sensitive_text"], 1)
+        self.assertGreater(metadata["risk"]["before"]["score"], 0)
+        self.assertEqual(metadata["risk"]["after"]["score"], 0)
+        self.assertEqual(metadata["risk"]["reduction_percent"], 100.0)
         protected = cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
         self.assertEqual(protected.shape, (80, 100, 3))
 

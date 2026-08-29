@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, 
 from pydantic import ValidationError
 
 from app.anonymization import ImageAnonymizer
+from app.privacy.risk_score import PrivacyRiskEngine
 from app.schemas import AnalysisResponse, ProtectionSettings
 from app.utils.image_validation import DecodedImage, read_and_validate_image
 
@@ -46,6 +47,25 @@ def _protect(decoded: DecodedImage, analysis: AnalysisResponse, settings: Protec
             detail="The analysis does not match the uploaded image dimensions. Analyze this image again.",
         )
     result = ImageAnonymizer().anonymize(decoded.pixels_bgr, analysis, settings)
+    details = analysis.analysis
+    statuses = {
+        "face_detection": details.face_detection.status,
+        "license_plate_detection": details.license_plate_detection.status,
+        "card_detection": details.card_detection.status,
+        "ocr": details.ocr.status,
+    }
+    engine = PrivacyRiskEngine()
+    before = engine.calculate(
+        analysis.image, details.face_detection.faces, details.main_subject,
+        details.license_plate_detection.plates, details.card_detection.cards,
+        details.sensitive_text.items, statuses,
+    )
+    after = engine.calculate(
+        analysis.image, details.face_detection.faces, details.main_subject,
+        details.license_plate_detection.plates, details.card_detection.cards,
+        details.sensitive_text.items, statuses, settings, result.protection,
+    )
+    result.protection.risk = engine.compare(before, after)
     return result, _encode_image(decoded, result.pixels_bgr)
 
 

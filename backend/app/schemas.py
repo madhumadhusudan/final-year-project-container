@@ -66,7 +66,7 @@ class FaceResult(BaseModel):
     normalized_center: Point
     distance_from_image_center: float = Field(ge=0)
     matched_person_id: int | None = None
-    role: Literal["main_subject", "background_face", "unclassified"] = "unclassified"
+    role: Literal["main_subject", "background_face", "document_face", "unclassified"] = "unclassified"
 
 
 class ImageDetails(BaseModel):
@@ -151,6 +151,39 @@ class CardDetectionDetails(BaseModel):
     diagnostics: DetectorDiagnostics | None = None
 
 
+DocumentType = Literal[
+    "aadhaar_card", "pan_card", "passport", "driving_license", "identity_document",
+]
+
+
+class DocumentResult(BaseModel):
+    document_id: int = Field(gt=0)
+    class_name: str
+    confidence: float = Field(ge=0, le=1)
+    bounding_box: BoundingBox
+    area_ratio: float = Field(ge=0, le=1)
+    center: Point
+    final_document_type: DocumentType
+    classification_confidence: float = Field(ge=0, le=1)
+    classification_status: Literal["model_confirmed", "context_supported", "uncertain"]
+    classification_reasons: list[str]
+    ocr_text_ids: list[int] = Field(default_factory=list)
+    sensitive_text_ids: list[int] = Field(default_factory=list)
+
+
+class DocumentDetectionDetails(BaseModel):
+    status: Literal["completed", "error", "unavailable"]
+    detector: str
+    document_count: int = Field(ge=0)
+    documents: list[DocumentResult]
+    message: str | None = None
+    model_source: str | None = None
+    model_license: str | None = None
+    model_class_names: list[str] = Field(default_factory=list)
+    confidence_threshold: float = Field(default=0.35, ge=0, le=1)
+    inference_image_size: int = Field(default=960, gt=0)
+
+
 class OCRTextResult(BaseModel):
     text_id: int = Field(gt=0)
     raw_text: str
@@ -197,6 +230,7 @@ class RiskBreakdown(BaseModel):
     background_faces: int = Field(default=0, ge=0)
     license_plates: int = Field(default=0, ge=0)
     payment_cards: int = Field(default=0, ge=0)
+    identity_documents: int = Field(default=0, ge=0)
     sensitive_text: int = Field(default=0, ge=0)
     context_uncertainty: int = Field(default=0, ge=0)
 
@@ -205,7 +239,7 @@ class RiskFactor(BaseModel):
     type: str
     category: Literal[
         "background_faces", "license_plates", "payment_cards",
-        "sensitive_text", "context_uncertainty",
+        "identity_documents", "sensitive_text", "context_uncertainty",
     ]
     severity: Literal["low", "medium", "high", "critical"]
     contribution: float = Field(ge=0, le=100)
@@ -228,6 +262,14 @@ class PrivacyRiskDetails(BaseModel):
     assessment: RiskAssessment
 
 
+class PrivacySensitiveElements(BaseModel):
+    background_faces: int = Field(default=0, ge=0)
+    license_plates: int = Field(default=0, ge=0)
+    payment_cards: int = Field(default=0, ge=0)
+    identity_documents: int = Field(default=0, ge=0)
+    sensitive_text: int = Field(default=0, ge=0)
+
+
 class AnalysisDetails(BaseModel):
     status: Literal["completed"] = "completed"
     # Day 4 fields remain available while clients migrate to the grouped output.
@@ -239,11 +281,16 @@ class AnalysisDetails(BaseModel):
     main_subject: MainSubjectDetails
     license_plate_detection: LicensePlateDetectionDetails
     card_detection: CardDetectionDetails
+    document_detection: DocumentDetectionDetails = Field(default_factory=lambda: DocumentDetectionDetails(
+        status="unavailable", detector="model_required", document_count=0, documents=[],
+        message="Dedicated document model required.",
+    ))
     ocr: OCRDetails
     sensitive_text: SensitiveTextDetails
     # Optional on input so Day 8 analysis payloads remain valid for /protect.
     # Every new /analyze response populates this field.
     privacy_risk: PrivacyRiskDetails | None = None
+    privacy_sensitive_elements: PrivacySensitiveElements = Field(default_factory=PrivacySensitiveElements)
 
 
 class PerformanceDetails(BaseModel):
@@ -252,6 +299,8 @@ class PerformanceDetails(BaseModel):
     face_detection_ms: int = Field(ge=0)
     license_plate_detection_ms: int = Field(ge=0)
     card_detection_ms: int = Field(ge=0)
+    document_detection_ms: int = Field(default=0, ge=0)
+    document_classification_ms: int = Field(default=0, ge=0)
     context_analysis_ms: int = Field(ge=0)
     ocr_detection_ms: int = Field(ge=0)
     sensitive_text_analysis_ms: int = Field(ge=0)
@@ -271,6 +320,7 @@ class ProtectionSettings(BaseModel):
     protect_background_faces: bool = True
     protect_license_plates: bool = True
     protect_cards: bool = True
+    protect_identity_documents: bool = True
     protect_sensitive_text: bool = True
     anonymization_method: Literal["blur", "pixelate", "blackout"] = "blur"
     strength: Literal["low", "medium", "high"] = "medium"
@@ -280,6 +330,7 @@ class ProtectionBreakdown(BaseModel):
     background_faces: int = Field(default=0, ge=0)
     license_plates: int = Field(default=0, ge=0)
     cards: int = Field(default=0, ge=0)
+    identity_documents: int = Field(default=0, ge=0)
     sensitive_text: int = Field(default=0, ge=0)
 
 

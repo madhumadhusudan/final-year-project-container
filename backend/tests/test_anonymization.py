@@ -35,9 +35,10 @@ def face(face_id: int, box: tuple[int, int, int, int], role: str) -> dict:
 def analysis_response(
     *, faces: list[dict] | None = None, subject_status: str = "not_found", subject_face_id: int | None = None,
     plates: list[tuple[int, int, int, int]] | None = None, cards: list[tuple[int, int, int, int]] | None = None,
+    documents: list[tuple[int, int, int, int]] | None = None,
     texts: list[tuple[int, int, int, int]] | None = None,
 ) -> AnalysisResponse:
-    faces, plates, cards, texts = faces or [], plates or [], cards or [], texts or []
+    faces, plates, cards, documents, texts = faces or [], plates or [], cards or [], documents or [], texts or []
     box = lambda values: dict(zip(("x1", "y1", "x2", "y2"), values))
     privacy_items = lambda values, name: [
         {"id": index, "class_name": name, "confidence": 0.9, "bounding_box": box(item)}
@@ -48,6 +49,16 @@ def analysis_response(
          "confidence": 0.9, "reason": "test", "bounding_box": box(item)}
         for index, item in enumerate(texts, 1)
     ]
+    document_items = [
+        {
+            "document_id": index, "class_name": "id_card", "confidence": 0.9,
+            "bounding_box": box(item), "area_ratio": ((item[2] - item[0]) * (item[3] - item[1])) / 8000,
+            "center": {"x": (item[0] + item[2]) / 2, "y": (item[1] + item[3]) / 2},
+            "final_document_type": "identity_document", "classification_confidence": 0.675,
+            "classification_status": "uncertain", "classification_reasons": ["synthetic test document"],
+        }
+        for index, item in enumerate(documents, 1)
+    ]
     return AnalysisResponse.model_validate({
         "image": {"filename": "test.png", "width": 100, "height": 80, "format": "PNG"},
         "analysis": {
@@ -57,6 +68,7 @@ def analysis_response(
             "main_subject": {"status": subject_status, "face_id": subject_face_id, "reason": "test"},
             "license_plate_detection": {"status": "completed", "detector": "test", "plate_count": len(plates), "plates": privacy_items(plates, "license_plate")},
             "card_detection": {"status": "completed", "detector": "test", "card_count": len(cards), "cards": privacy_items(cards, "card")},
+            "document_detection": {"status": "completed", "detector": "test", "document_count": len(documents), "documents": document_items},
             "ocr": {"status": "completed", "engine": "test", "languages": ["en"], "text_count": 0, "texts": []},
             "sensitive_text": {"status": "completed", "count": len(text_items), "items": text_items},
         },
@@ -167,7 +179,8 @@ class PrivacyRuleTests(unittest.TestCase):
         )
         result = ImageAnonymizer().anonymize(gradient_image(), analysis, ProtectionSettings(anonymization_method="blackout"))
         self.assertEqual(result.protection.breakdown.model_dump(), {
-            "background_faces": 1, "license_plates": 1, "cards": 1, "sensitive_text": 1,
+            "background_faces": 1, "license_plates": 1, "cards": 1,
+            "identity_documents": 0, "sensitive_text": 1,
         })
         self.assertEqual(result.protection.regions_protected, 4)
         self.assertTrue(result.protection.main_subject_preserved)
@@ -196,6 +209,31 @@ class PrivacyRuleTests(unittest.TestCase):
         result = ImageAnonymizer().anonymize(original, analysis_response(), ProtectionSettings())
         self.assertTrue(np.array_equal(result.pixels_bgr, original))
         self.assertEqual(result.protection.regions_protected, 0)
+
+    def test_document_whole_region_methods_toggle_and_text_precedence(self) -> None:
+        original = gradient_image()
+        original[15:60:2, 20:70:2] = 255
+        analysis = analysis_response(documents=[(20, 15, 70, 60)], texts=[(30, 25, 60, 35)])
+        for method in ("blur", "pixelate", "blackout"):
+            with self.subTest(method=method):
+                result = ImageAnonymizer().anonymize(
+                    original, analysis, ProtectionSettings(anonymization_method=method),
+                )
+                self.assertEqual(result.protection.breakdown.identity_documents, 1)
+                self.assertEqual(result.protection.breakdown.sensitive_text, 0)
+                # The padded document ROI changes, while a distant outside corner is untouched.
+                self.assertFalse(np.array_equal(result.pixels_bgr[15:60, 20:70], original[15:60, 20:70]))
+                self.assertTrue(np.array_equal(result.pixels_bgr[:10, :10], original[:10, :10]))
+
+        disabled = ImageAnonymizer().anonymize(
+            original, analysis,
+            ProtectionSettings(
+                protect_identity_documents=False, protect_sensitive_text=False,
+                anonymization_method="blackout",
+            ),
+        )
+        self.assertTrue(np.array_equal(disabled.pixels_bgr, original))
+        self.assertEqual(disabled.protection.breakdown.identity_documents, 0)
 
 
 class ProtectionApiTests(unittest.TestCase):
@@ -239,6 +277,14 @@ class ProtectionApiTests(unittest.TestCase):
         response = self.post(analysis=mismatch)
         self.assertEqual(response.status_code, 409)
         self.assertNotIn("traceback", response.text.lower())
+
+    def test_protect_api_returns_document_count_and_document_risk_reduction(self) -> None:
+        response = self.post(analysis=analysis_response(documents=[(20, 15, 70, 60)]))
+        self.assertEqual(response.status_code, 200)
+        metadata = json.loads(unquote(response.headers["x-protection-metadata"]))
+        self.assertEqual(metadata["breakdown"]["identity_documents"], 1)
+        self.assertGreater(metadata["risk"]["before"]["score"], 0)
+        self.assertEqual(metadata["risk"]["after"]["score"], 0)
 
 
 if __name__ == "__main__":

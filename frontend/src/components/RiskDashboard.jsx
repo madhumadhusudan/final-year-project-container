@@ -12,6 +12,7 @@ const breakdownLabels = {
   background_faces: 'Background Faces',
   license_plates: 'License Plates',
   payment_cards: 'Payment Cards',
+  identity_documents: 'Identity Documents',
   sensitive_text: 'Sensitive Text',
   context_uncertainty: 'Context Uncertainty',
 }

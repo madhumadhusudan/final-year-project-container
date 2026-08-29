@@ -10,8 +10,10 @@ function ResultsPanel({ analysisStatus, hasImage, result, error }) {
   const mainSubject = result?.analysis?.main_subject
   const plateDetection = result?.analysis?.license_plate_detection
   const cardDetection = result?.analysis?.card_detection
+  const documentDetection = result?.analysis?.document_detection
   const plates = plateDetection?.plates || []
   const cards = cardDetection?.cards || []
+  const documents = documentDetection?.documents || []
   const backgroundFaces = faces.filter((face) => face.role === 'background_face')
   const ocr = result?.analysis?.ocr
   const sensitiveText = result?.analysis?.sensitive_text
@@ -27,7 +29,7 @@ function ResultsPanel({ analysisStatus, hasImage, result, error }) {
       {hasResult && <div className="mt-7 border-t border-slate-200 pt-6"><div className="flex items-center justify-between gap-3"><h3 className="text-lg font-bold text-slate-950">Detected Faces</h3><span className="rounded-full bg-fuchsia-50 px-3 py-1 text-sm font-bold text-fuchsia-800">{faces.length} {faces.length === 1 ? 'Face' : 'Faces'}</span></div>
         {faceDetection?.status === 'error' && <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">{faceDetection.error}</p>}
         {faceDetection?.status !== 'error' && faces.length === 0 && <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-5 text-center font-semibold text-slate-700">No faces detected.</p>}
-        {faces.length > 0 && <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{faces.map((face) => <article key={face.face_id} className="rounded-xl border border-fuchsia-100 bg-fuchsia-50/60 p-4"><p className="font-bold text-slate-950">Face {face.face_id}</p><dl className="mt-2 space-y-1 text-sm"><div className="flex justify-between gap-3"><dt className="text-slate-600">Confidence</dt><dd className="font-bold text-fuchsia-800">{formatConfidence(face.confidence)}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-600">Image coverage</dt><dd className="font-bold text-slate-800">{formatConfidence(face.area_ratio)}</dd></div></dl></article>)}</div>}
+        {faces.length > 0 && <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{faces.map((face) => <article key={face.face_id} className="rounded-xl border border-fuchsia-100 bg-fuchsia-50/60 p-4"><div className="flex items-center justify-between gap-2"><p className="font-bold text-slate-950">Face {face.face_id}</p>{face.role === 'document_face' && <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-bold text-violet-800">Document photo</span>}</div><dl className="mt-2 space-y-1 text-sm"><div className="flex justify-between gap-3"><dt className="text-slate-600">Confidence</dt><dd className="font-bold text-fuchsia-800">{formatConfidence(face.confidence)}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-600">Image coverage</dt><dd className="font-bold text-slate-800">{formatConfidence(face.area_ratio)}</dd></div></dl></article>)}</div>}
       </div>}
       {hasResult && <div className="mt-7 grid gap-5 border-t border-slate-200 pt-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-teal-200 bg-teal-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700">Main Subject</p>
@@ -36,12 +38,13 @@ function ResultsPanel({ analysisStatus, hasImage, result, error }) {
           {mainSubject?.status === 'not_found' && <p className="mt-2 text-sm font-semibold text-slate-700">No main subject found.</p>}
           {backgroundFaces.length > 0 && <p className="mt-3 text-sm font-semibold text-slate-700">Background faces: {backgroundFaces.map((face) => `Face ${face.face_id}`).join(', ')}</p>}
         </section>
-        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-600">Privacy-Sensitive Elements</p><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-slate-500">Faces</dt><dd className="text-lg font-bold">{faces.length}</dd></div><div><dt className="text-slate-500">Background Faces</dt><dd className="text-lg font-bold">{backgroundFaces.length}</dd></div><div><dt className="text-slate-500">License Plates</dt><dd className="text-lg font-bold">{plates.length}</dd></div><div><dt className="text-slate-500">Payment Cards</dt><dd className="text-lg font-bold">{cards.length}</dd></div><div><dt className="text-slate-500">Sensitive Text</dt><dd className="text-lg font-bold">{sensitiveItems.length}</dd></div></dl></section>
+        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-600">Privacy-Sensitive Elements</p><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-slate-500">Faces</dt><dd className="text-lg font-bold">{faces.length}</dd></div><div><dt className="text-slate-500">Background Faces</dt><dd className="text-lg font-bold">{backgroundFaces.length}</dd></div><div><dt className="text-slate-500">License Plates</dt><dd className="text-lg font-bold">{plates.length}</dd></div><div><dt className="text-slate-500">Payment Cards</dt><dd className="text-lg font-bold">{cards.length}</dd></div><div><dt className="text-slate-500">Identity Documents</dt><dd className="text-lg font-bold">{documents.length}</dd></div><div><dt className="text-slate-500">Sensitive Text</dt><dd className="text-lg font-bold">{sensitiveItems.length}</dd></div></dl></section>
       </div>}
       {hasResult && <div className="mt-7 grid gap-5 border-t border-slate-200 pt-6 lg:grid-cols-2">
         <PrivacyDetectorSection title="License Plates Detected" noun="License Plate" module={plateDetection} items={plates} />
         <PrivacyDetectorSection title="Payment Cards Detected" noun="Card" module={cardDetection} items={cards} />
       </div>}
+      {hasResult && <DocumentSection module={documentDetection} documents={documents} inferenceMs={result.performance.document_detection_ms} />}
       {hasResult && <section className="mt-7 border-t border-slate-200 pt-6"><div className="flex items-center justify-between gap-3"><div><h3 className="text-lg font-bold text-slate-950">Sensitive Text</h3><p className="mt-1 text-sm text-slate-500">{ocr?.text_count || 0} OCR regions checked locally</p></div><span className="rounded-full bg-rose-50 px-3 py-1 text-sm font-bold text-rose-800">{sensitiveItems.length}</span></div>
         {sensitiveText?.status !== 'completed' && <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">{sensitiveText?.message || 'OCR is unavailable.'}</p>}
         {sensitiveText?.status === 'completed' && sensitiveItems.length === 0 && <p className="mt-4 rounded-xl bg-slate-50 p-4 text-center text-sm font-semibold text-slate-700">No sensitive text detected.</p>}
@@ -49,6 +52,15 @@ function ResultsPanel({ analysisStatus, hasImage, result, error }) {
       </section>}
     </section>
   )
+}
+
+function DocumentSection({ module, documents, inferenceMs }) {
+  return <section className="mt-7 border-t border-slate-200 pt-6"><div className="flex items-center justify-between gap-3"><div><h3 className="text-lg font-bold text-slate-950">Identity Documents</h3><p className="mt-1 text-sm text-slate-500">Dedicated local detector · {inferenceMs || 0} ms</p></div><span className="rounded-full bg-violet-50 px-3 py-1 text-sm font-bold text-violet-800">{documents.length}</span></div>
+    {module?.status === 'unavailable' && <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900">Identity document detector unavailable. {module.message}</p>}
+    {module?.status === 'error' && <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-900">{module.message || 'Identity document detection failed.'}</p>}
+    {module?.status === 'completed' && documents.length === 0 && <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm font-medium text-slate-700">No identity documents detected.</p>}
+    {documents.length > 0 && <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{documents.map((document) => <article key={document.document_id} className="rounded-xl border border-violet-100 bg-violet-50/60 p-4"><div className="flex items-start justify-between gap-3"><p className="font-bold text-slate-950">{formatClassName(document.final_document_type)}</p><span className="text-sm font-bold text-violet-800">{formatConfidence(document.classification_confidence)}</span></div><p className="mt-2 text-xs font-semibold text-slate-600">Model class: {formatClassName(document.class_name)}</p><p className="mt-1 text-xs text-slate-600">{document.classification_status === 'uncertain' ? 'Classification uncertain' : formatClassName(document.classification_status)}</p><ul className="mt-2 space-y-1 text-xs leading-5 text-slate-600">{document.classification_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></article>)}</div>}
+  </section>
 }
 
 function PrivacyDetectorSection({ title, noun, module, items }) {

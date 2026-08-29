@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Iterable, Mapping
 
 from app.schemas import (
-    CardResult, FaceResult, ImageDetails, MainSubjectDetails, PrivacyObjectResult,
+    CardResult, DocumentResult, FaceResult, ImageDetails, MainSubjectDetails, PrivacyObjectResult,
     PrivacyRiskDetails, ProtectionMetadata, ProtectionSettings, RiskAssessment,
     RiskBreakdown, RiskFactor, RiskReductionDetails, RiskScoreSummary,
     SensitiveTextResult,
@@ -23,7 +23,8 @@ class RiskConfiguration:
     )
     category_caps: tuple[tuple[str, float], ...] = (
         ("background_faces", 35.0), ("license_plates", 30.0),
-        ("payment_cards", 35.0), ("sensitive_text", 60.0),
+        ("payment_cards", 35.0), ("identity_documents", 40.0),
+        ("sensitive_text", 60.0),
         ("context_uncertainty", 10.0),
     )
 
@@ -69,6 +70,7 @@ class PrivacyRiskEngine:
             "face": ((0.002, 0.65), (0.01, 0.80), (0.04, 1.0), (1.01, 1.15)),
             "plate": ((0.0005, 0.65), (0.002, 0.80), (0.01, 0.95), (1.01, 1.10)),
             "card": ((0.01, 0.75), (0.05, 0.90), (0.15, 1.0), (1.01, 1.08)),
+            "document": ((0.01, 0.65), (0.05, 0.80), (0.15, 0.95), (1.01, 1.08)),
             "text": ((0.0001, 0.75), (0.001, 0.90), (0.005, 1.0), (1.01, 1.08)),
         }[kind]
         return next(multiplier for upper_bound, multiplier in thresholds if ratio <= upper_bound)
@@ -150,10 +152,13 @@ class PrivacyRiskEngine:
         self, faces: list[FaceResult], main_subject: MainSubjectDetails,
     ) -> tuple[list[_Candidate], int]:
         if main_subject.status == "identified":
-            exposed = [face for face in faces if face.face_id != main_subject.face_id]
+            exposed = [
+                face for face in faces
+                if face.face_id != main_subject.face_id and face.role != "document_face"
+            ]
         else:
             # With no reliable preservation target, every visible face is an exposure.
-            exposed = list(faces)
+            exposed = [face for face in faces if face.role != "document_face"]
         candidates = []
         for face in exposed:
             contribution = (
@@ -212,6 +217,44 @@ class PrivacyRiskEngine:
                     "Payment card exposed", "Hide the complete payment-card region.",
                 ))
         return candidates, grouped_text_ids
+
+    def _document_candidates(
+        self, documents: list[DocumentResult], texts: list[SensitiveTextResult], image_area: int,
+    ) -> tuple[list[_Candidate], set[int]]:
+        weights = {
+            "aadhaar_card": 28.0, "pan_card": 23.0, "passport": 28.0,
+            "driving_license": 23.0, "identity_document": 20.0,
+        }
+        display_names = {
+            "aadhaar_card": "Aadhaar-like identity document",
+            "pan_card": "PAN-like identity document", "passport": "passport",
+            "driving_license": "driving licence", "identity_document": "identity document",
+        }
+        candidates: list[_Candidate] = []
+        grouped_ids: set[int] = set()
+        by_id = {item.id: item for item in texts}
+        for document in documents:
+            related = [by_id[item_id] for item_id in document.sensitive_text_ids if item_id in by_id]
+            grouped_ids.update(item.id for item in related)
+            confidence = self._confidence_multiplier(
+                max(document.confidence, document.classification_confidence)
+            )
+            visibility = self._visibility_multiplier(document.area_ratio, "document")
+            sensitive_bonus = min(
+                4.0, sum(2.5 * self._confidence_multiplier(item.confidence) for item in related)
+            )
+            readable_bonus = min(2.0, 0.5 * len(document.ocr_text_ids))
+            contribution = weights[document.final_document_type] * confidence * visibility
+            contribution += sensitive_bonus + readable_bonus
+            name = display_names[document.final_document_type]
+            reason = f"A detected {name} exposes a complete high-sensitivity document region."
+            if related or document.ocr_text_ids:
+                reason = f"A detected {name} is visible with readable OCR context inside its region."
+            candidates.append(_Candidate(
+                document.final_document_type, "identity_documents", contribution, reason,
+                f"{name.capitalize()} exposed", "Protect the complete identity-document region.",
+            ))
+        return candidates, grouped_ids
 
     def _text_candidates(
         self, texts: list[SensitiveTextResult], grouped_ids: set[int], image_area: int,
@@ -277,6 +320,7 @@ class PrivacyRiskEngine:
             "background_faces": settings.protect_background_faces,
             "license_plates": settings.protect_license_plates,
             "payment_cards": settings.protect_cards,
+            "identity_documents": settings.protect_identity_documents,
             "sensitive_text": settings.protect_sensitive_text,
             "context_uncertainty": settings.protect_background_faces,
         }
@@ -284,6 +328,7 @@ class PrivacyRiskEngine:
             "background_faces": protection.breakdown.background_faces,
             "license_plates": protection.breakdown.license_plates,
             "payment_cards": protection.breakdown.cards,
+            "identity_documents": protection.breakdown.identity_documents,
             "sensitive_text": protection.breakdown.sensitive_text,
         }
         eligible_counts = {
@@ -343,6 +388,7 @@ class PrivacyRiskEngine:
 
         category_messages = {
             "payment_cards": f"{counts.get('payment_cards', 0)} payment card(s) exposed",
+            "identity_documents": f"{counts.get('identity_documents', 0)} identity document(s) exposed",
             "background_faces": f"{counts.get('background_faces', 0)} background face(s) visible",
             "license_plates": f"{counts.get('license_plates', 0)} license plate(s) exposed",
             "context_uncertainty": "Main subject is uncertain",
@@ -382,6 +428,7 @@ class PrivacyRiskEngine:
         sensitive_text: list[SensitiveTextResult], detector_statuses: Mapping[str, str],
         protection_settings: ProtectionSettings | None = None,
         protection_metadata: ProtectionMetadata | None = None,
+        documents: list[DocumentResult] | None = None,
     ) -> PrivacyRiskDetails:
         """Calculate original or metadata-derived residual risk without rerunning detectors."""
         image_area = image_metadata.width * image_metadata.height
@@ -389,11 +436,17 @@ class PrivacyRiskEngine:
         face_candidates, face_count = self._face_candidates(faces, main_subject)
         plate_candidates, plate_text_ids = self._object_candidates(plates, texts, image_area, "plate")
         card_candidates, card_text_ids = self._object_candidates(cards, texts, image_area, "card")
-        text_candidates = self._text_candidates(
-            texts, plate_text_ids | card_text_ids, image_area,
+        document_candidates, document_text_ids = self._document_candidates(
+            documents or [], texts, image_area,
         )
-        candidates = face_candidates + plate_candidates + card_candidates + text_candidates
-        if main_subject.status == "uncertain" and faces:
+        text_candidates = self._text_candidates(
+            texts, plate_text_ids | card_text_ids | document_text_ids, image_area,
+        )
+        candidates = (
+            face_candidates + plate_candidates + card_candidates
+            + document_candidates + text_candidates
+        )
+        if main_subject.status == "uncertain" and face_count:
             candidates.append(_Candidate(
                 "main_subject_uncertainty", "context_uncertainty", 8.0,
                 "The system cannot confidently determine which person should remain visible.",
@@ -403,6 +456,7 @@ class PrivacyRiskEngine:
             "background_faces": face_count,
             "license_plates": len(plates),
             "payment_cards": len(cards),
+            "identity_documents": len(documents or []),
         }
         if protection_settings is not None and protection_metadata is not None:
             candidates = self._apply_protection(candidates, protection_settings, protection_metadata)

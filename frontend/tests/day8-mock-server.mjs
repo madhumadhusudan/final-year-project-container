@@ -34,17 +34,19 @@ const analysis = {
     main_subject: { status: 'identified', face_id: 1, subject_score: 0.91, reason: 'Mock context result.' },
     license_plate_detection: { status: 'completed', detector: 'mock', plate_count: 1, plates: [{ id: 1, class_name: 'license_plate', confidence: 0.9, bounding_box: { x1: 200, y1: 130, x2: 275, y2: 155 } }] },
     card_detection: { status: 'completed', detector: 'mock', card_count: 1, cards: [{ id: 1, class_name: 'card', confidence: 0.89, bounding_box: { x1: 120, y1: 100, x2: 190, y2: 145 } }] },
+    document_detection: { status: 'completed', detector: 'mock_document', document_count: 1, documents: [{ document_id: 1, class_name: 'id_card', confidence: 0.9, bounding_box: { x1: 210, y1: 85, x2: 305, y2: 125 }, area_ratio: 0.066, center: { x: 257.5, y: 105 }, final_document_type: 'identity_document', classification_confidence: 0.675, classification_status: 'uncertain', classification_reasons: ['Dedicated test detector predicted an identity-card region.'], ocr_text_ids: [], sensitive_text_ids: [] }] },
     ocr: { status: 'completed', engine: 'mock', languages: ['en'], text_count: 1, texts: [] },
     sensitive_text: { status: 'completed', count: 1, items: [{ id: 1, text_id: 1, type: 'email', masked_value: 't***@example.com', confidence: 0.94, reason: 'Mock sensitive text.', bounding_box: { x1: 10, y1: 150, x2: 105, y2: 170 } }] },
     privacy_risk: {
-      score: 70, level: 'HIGH', summary: 'Multiple high-impact privacy-sensitive elements are visible.',
-      breakdown: { background_faces: 12, license_plates: 20, payment_cards: 30, sensitive_text: 8, context_uncertainty: 0 },
-      factors: [], top_risks: ['Payment card exposed', '1 license plate exposed', '1 background face visible'],
-      recommendations: ['Hide the complete payment-card region.', 'Anonymize visible license plates.', 'Protect background faces.'],
+      score: 95, level: 'CRITICAL', summary: 'Critical privacy exposure was detected across the image.',
+      breakdown: { background_faces: 12, license_plates: 20, payment_cards: 30, identity_documents: 25, sensitive_text: 8, context_uncertainty: 0 },
+      factors: [], top_risks: ['Payment card exposed', 'Identity document exposed', '1 license plate exposed'],
+      recommendations: ['Hide the complete payment-card region.', 'Protect the complete identity-document region.', 'Anonymize visible license plates.'],
       assessment: { status: 'complete', unavailable_modules: [] },
     },
+    privacy_sensitive_elements: { background_faces: 1, license_plates: 1, payment_cards: 1, identity_documents: 1, sensitive_text: 1 },
   },
-  performance: { inference_time_ms: 5, object_detection_ms: 5, face_detection_ms: 2, license_plate_detection_ms: 1, card_detection_ms: 1, context_analysis_ms: 1, ocr_detection_ms: 2, sensitive_text_analysis_ms: 1, total_analysis_ms: 13 },
+  performance: { inference_time_ms: 5, object_detection_ms: 5, face_detection_ms: 2, license_plate_detection_ms: 1, card_detection_ms: 1, document_detection_ms: 2, document_classification_ms: 1, context_analysis_ms: 1, ocr_detection_ms: 2, sensitive_text_analysis_ms: 1, total_analysis_ms: 16 },
 }
 
 const server = http.createServer((request, response) => {
@@ -74,6 +76,7 @@ const server = http.createServer((request, response) => {
         background_faces: settings.protect_background_faces === false ? 0 : 1,
         license_plates: settings.protect_license_plates === false ? 0 : 1,
         cards: settings.protect_cards === false ? 0 : 1,
+        identity_documents: settings.protect_identity_documents === false ? 0 : 1,
         sensitive_text: settings.protect_sensitive_text === false ? 0 : 1,
       }
       const protection = {
@@ -81,10 +84,10 @@ const server = http.createServer((request, response) => {
         regions_protected: Object.values(breakdown).reduce((total, count) => total + count, 0), breakdown,
         main_subject_preserved: true, warnings: [],
         risk: {
-          before: { score: 70, level: 'HIGH' },
-          after: { score: settings.protect_license_plates === false ? 20 : 7, level: settings.protect_license_plates === false ? 'MODERATE' : 'LOW' },
-          reduction: settings.protect_license_plates === false ? 50 : 63,
-          reduction_percent: settings.protect_license_plates === false ? 71.4 : 90.0,
+          before: { score: 95, level: 'CRITICAL' },
+          after: { score: settings.protect_license_plates === false ? 27 : 7, level: settings.protect_license_plates === false ? 'MODERATE' : 'LOW' },
+          reduction: settings.protect_license_plates === false ? 68 : 88,
+          reduction_percent: settings.protect_license_plates === false ? 71.6 : 92.6,
         },
       }
       response.writeHead(200, {
@@ -98,4 +101,4 @@ const server = http.createServer((request, response) => {
   })
 })
 
-server.listen(8000, '127.0.0.1', () => console.log('Day 8 browser mock listening on 8000'))
+server.listen(8000, '127.0.0.1', () => console.log('Day 10 browser mock listening on 8000'))

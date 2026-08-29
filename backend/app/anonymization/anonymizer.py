@@ -15,6 +15,7 @@ from .region_utils import Region, contains_region, merge_regions, pad_region, sa
 FACE_PADDING = 0.12
 PLATE_PADDING = 0.06
 CARD_PADDING = 0.04
+DOCUMENT_PADDING = 0.05
 TEXT_PADDING = 0.08
 
 
@@ -95,7 +96,8 @@ class ImageAnonymizer:
         details = analysis.analysis
         warnings: list[str] = []
         category_regions: dict[str, list[Region]] = {
-            "background_faces": [], "license_plates": [], "cards": [], "sensitive_text": [],
+            "background_faces": [], "license_plates": [], "cards": [],
+            "identity_documents": [], "sensitive_text": [],
         }
 
         subject_identified = details.main_subject.status == "identified"
@@ -106,15 +108,18 @@ class ImageAnonymizer:
             if face.face_id == preserved_face_id
         ), None)
         if settings.protect_background_faces:
-            for face in details.face_detection.faces:
+            external_faces = [
+                face for face in details.face_detection.faces if face.role != "document_face"
+            ]
+            for face in external_faces:
                 if preserved_face_id is not None and face.face_id == preserved_face_id:
                     continue
                 region = self._expanded(face.bounding_box, FACE_PADDING, width, height)
                 if region:
                     category_regions["background_faces"].append(region)
-            if details.face_detection.faces and details.main_subject.status == "uncertain":
+            if external_faces and details.main_subject.status == "uncertain":
                 warnings.append("Main subject could not be identified confidently. All detected faces were protected.")
-            elif details.face_detection.faces and details.main_subject.status == "not_found":
+            elif external_faces and details.main_subject.status == "not_found":
                 warnings.append("No main subject was identified. All detected faces were protected.")
 
         if settings.protect_license_plates:
@@ -128,12 +133,21 @@ class ImageAnonymizer:
                 if (region := self._expanded(item.bounding_box, CARD_PADDING, width, height)) is not None
             ]
 
+        if settings.protect_identity_documents:
+            category_regions["identity_documents"] = [
+                region for item in details.document_detection.documents
+                if (region := self._expanded(item.bounding_box, DOCUMENT_PADDING, width, height)) is not None
+            ]
+
         if settings.protect_sensitive_text:
             text_regions = [
                 region for item in details.sensitive_text.items
                 if (region := self._expanded(item.bounding_box, TEXT_PADDING, width, height)) is not None
             ]
-            covering_regions = category_regions["cards"] + category_regions["license_plates"]
+            covering_regions = (
+                category_regions["identity_documents"]
+                + category_regions["cards"] + category_regions["license_plates"]
+            )
             text_regions = [
                 region for region in text_regions
                 if not any(contains_region(container, region) for container in covering_regions)
@@ -141,7 +155,9 @@ class ImageAnonymizer:
             category_regions["sensitive_text"] = merge_regions(text_regions)
 
         counts: dict[str, int] = {}
-        for category in ("cards", "license_plates", "sensitive_text", "background_faces"):
+        for category in (
+            "identity_documents", "cards", "license_plates", "sensitive_text", "background_faces",
+        ):
             applied = sum(self._apply(image, region, settings) for region in category_regions[category])
             counts[category] = applied
 

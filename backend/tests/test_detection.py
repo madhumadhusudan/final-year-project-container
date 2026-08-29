@@ -158,7 +158,10 @@ class DetectionServiceTests(unittest.TestCase):
         self.assertEqual(response.analysis.main_subject.status, "not_found")
         self.assertEqual(response.analysis.license_plate_detection.status, "unavailable")
         self.assertEqual(response.analysis.card_detection.status, "unavailable")
+        self.assertEqual(response.analysis.document_detection.status, "unavailable")
         self.assertIn("model required", response.analysis.card_detection.message.lower())
+        self.assertIn("document model required", response.analysis.document_detection.message.lower())
+        self.assertIn("document_detection", response.analysis.privacy_risk.assessment.unavailable_modules)
 
     def test_privacy_boxes_are_clipped_and_plate_matches_vehicle(self) -> None:
         objects = [RawDetection(2, "car", 0.9, 10, 10, 110, 70)]
@@ -180,6 +183,16 @@ class DetectionServiceTests(unittest.TestCase):
         self.assertEqual(response.analysis.license_plate_detection.status, "error")
         self.assertEqual(response.analysis.card_detection.status, "unavailable")
         self.assertNotIn("private", response.analysis.license_plate_detection.message)
+
+    def test_document_detector_failure_is_isolated_and_marks_risk_partial(self) -> None:
+        response = DetectionService(
+            StaticDetector([]), StaticFaceDetector(), test_settings(),
+            document_detector=StaticPrivacyDetector(fails=True),
+        ).analyze(DecodedImage(np.zeros((80, 120, 3), dtype=np.uint8), 120, 80, "PNG"), "image.png")
+        self.assertEqual(response.analysis.document_detection.status, "error")
+        self.assertEqual(response.analysis.document_detection.document_count, 0)
+        self.assertNotIn("private", response.analysis.document_detection.message)
+        self.assertIn("document_detection", response.analysis.privacy_risk.assessment.unavailable_modules)
 
     def test_ocr_and_sensitive_text_are_separate_and_boxes_are_clipped(self) -> None:
         ocr = StaticOCRService([RawOCRText("Call 9876543210", "Call 9876543210", 0.93, -5, 10, 130, 40)])
@@ -203,6 +216,37 @@ class DetectionServiceTests(unittest.TestCase):
         self.assertEqual(response.analysis.ocr.status, "error")
         self.assertEqual(response.analysis.sensitive_text.status, "error")
         self.assertNotIn("private", response.analysis.ocr.message)
+
+    def test_document_detection_classification_face_context_and_risk_are_integrated(self) -> None:
+        document_detector = StaticPrivacyDetector([
+            RawPrivacyObject("aadhaar_card", 0.93, -5, 5, 75, 72),
+            RawPrivacyObject("passport", 0.88, 80, 10, 118, 70),
+        ])
+        ocr_service = StaticOCRService([
+            RawOCRText("Aadhaar UIDAI", "Aadhaar UIDAI", 0.96, 5, 10, 65, 25),
+            RawOCRText("1234 5678 9012", "1234 5678 9012", 0.94, 8, 45, 65, 60),
+        ])
+        faces = [RawFace(0.95, 15, 25, 38, 48)]
+        response = DetectionService(
+            StaticDetector([]), StaticFaceDetector(faces), test_settings(),
+            ocr_service=ocr_service, document_detector=document_detector,
+        ).analyze(DecodedImage(np.zeros((80, 120, 3), dtype=np.uint8), 120, 80, "PNG"), "safe-docs.png")
+
+        details = response.analysis.document_detection
+        self.assertEqual(details.status, "completed")
+        self.assertEqual(details.document_count, 2)
+        self.assertEqual(details.documents[0].bounding_box.x1, 0)
+        self.assertEqual(details.documents[0].final_document_type, "aadhaar_card")
+        self.assertEqual(details.documents[0].classification_status, "context_supported")
+        self.assertEqual(details.documents[1].final_document_type, "passport")
+        self.assertEqual(response.analysis.face_detection.faces[0].role, "document_face")
+        self.assertEqual(response.analysis.main_subject.status, "not_found")
+        self.assertGreater(response.analysis.privacy_risk.breakdown.identity_documents, 0)
+        self.assertEqual(response.analysis.privacy_risk.breakdown.background_faces, 0)
+        self.assertEqual(response.analysis.privacy_risk.breakdown.sensitive_text, 0)
+        self.assertEqual(response.analysis.privacy_sensitive_elements.identity_documents, 2)
+        self.assertGreaterEqual(response.performance.document_detection_ms, 0)
+        self.assertGreaterEqual(response.performance.document_classification_ms, 0)
 
 
 class AnalysisApiTests(unittest.TestCase):
@@ -229,6 +273,7 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertIn("total_analysis_ms", payload["performance"])
         self.assertEqual(payload["analysis"]["license_plate_detection"]["status"], "unavailable")
         self.assertEqual(payload["analysis"]["card_detection"]["status"], "unavailable")
+        self.assertEqual(payload["analysis"]["document_detection"]["status"], "unavailable")
         risk = payload["analysis"]["privacy_risk"]
         self.assertEqual(risk["score"], 0)
         self.assertEqual(risk["assessment"]["status"], "partial")

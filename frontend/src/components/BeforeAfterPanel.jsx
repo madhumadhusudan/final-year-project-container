@@ -4,6 +4,7 @@ const labels = {
   background_faces: ['background face', 'background faces'],
   license_plates: ['license plate', 'license plates'],
   cards: ['payment card', 'payment cards'],
+  identity_documents: ['identity document', 'identity documents'],
   sensitive_text: ['sensitive text region', 'sensitive text regions'],
 }
 

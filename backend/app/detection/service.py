@@ -8,14 +8,15 @@ from functools import lru_cache
 from app.config import Settings, settings
 from app.schemas import (
     AnalysisDetails, AnalysisResponse, BoundingBox, CardDetectionDetails, CardResult, DetectionResult,
-    DetectorDiagnostics,
+    DetectorDiagnostics, DocumentDetectionDetails,
     FaceDetectionDetails, FaceResult, ImageDetails, LicensePlateDetectionDetails,
     ObjectDetectionDetails, OCRDetails, OCRTextResult, PerformanceDetails, Point,
-    PrivacyObjectResult, SensitiveTextDetails,
+    PrivacyObjectResult, PrivacySensitiveElements, SensitiveTextDetails,
 )
 from app.context.main_subject_analyzer import MainSubjectAnalyzer
 from app.ocr.ocr_service import OCRService, UnavailableOCRService
 from app.privacy.sensitive_text_classifier import SensitiveTextClassifier
+from app.privacy.document_classifier import DocumentClassifier
 from app.privacy.risk_score import PrivacyRiskEngine
 from app.utils.image_validation import DecodedImage
 
@@ -23,20 +24,24 @@ from .yolo_detector import YoloDetector
 from .face_detector import FaceDetector, UnavailableFaceDetector
 from .card_detector import CardDetector
 from .license_plate_detector import LicensePlateDetector
+from .document_detector import DocumentDetector
 
 
 class DetectionService:
     def __init__(self, detector: YoloDetector, face_detector: FaceDetector, app_settings: Settings = settings,
                  plate_detector: LicensePlateDetector | None = None, card_detector: CardDetector | None = None,
-                 ocr_service: OCRService | UnavailableOCRService | None = None) -> None:
+                 ocr_service: OCRService | UnavailableOCRService | None = None,
+                 document_detector: DocumentDetector | None = None) -> None:
         self._detector = detector
         self._face_detector = face_detector
         self._settings = app_settings
         self._plate_detector = plate_detector
         self._card_detector = card_detector
+        self._document_detector = document_detector
         self._subject_analyzer = MainSubjectAnalyzer(app_settings)
         self._ocr_service = ocr_service or UnavailableOCRService()
         self._sensitive_text_classifier = SensitiveTextClassifier()
+        self._document_classifier = DocumentClassifier()
         self._risk_engine = PrivacyRiskEngine()
 
     @staticmethod
@@ -73,6 +78,29 @@ class DetectionService:
                     key=lambda vehicle: (vehicle.bounding_box.x2 - vehicle.bounding_box.x1)
                     * (vehicle.bounding_box.y2 - vehicle.bounding_box.y1),
                 ).id
+
+    @staticmethod
+    def _exclude_document_faces(
+        faces: list[FaceResult], documents: list[PrivacyObjectResult],
+    ) -> list[FaceResult]:
+        """Mark portrait photos substantially contained by detected documents."""
+        external_faces = []
+        for face in faces:
+            face_box = face.bounding_box
+            contained = False
+            for document in documents:
+                doc_box = document.bounding_box
+                intersection = max(0, min(face_box.x2, doc_box.x2) - max(face_box.x1, doc_box.x1)) * max(
+                    0, min(face_box.y2, doc_box.y2) - max(face_box.y1, doc_box.y1)
+                )
+                if intersection / max(1, face.area) >= 0.8:
+                    contained = True
+                    break
+            if contained:
+                face.role = "document_face"
+            else:
+                external_faces.append(face)
+        return external_faces
 
     def analyze(self, decoded: DecodedImage, filename: str) -> AnalysisResponse:
         total_started = time.perf_counter()
@@ -182,8 +210,24 @@ class DetectionService:
                 tiles_processed=getattr(card_run, "tiles_processed", 1),
             )
 
+        document_started = time.perf_counter()
+        document_error = None
+        if self._document_detector is None:
+            raw_documents = []
+            document_status = "unavailable"
+        else:
+            try:
+                raw_documents = self._document_detector.detect(decoded.pixels_bgr)
+                document_status = "completed"
+            except RuntimeError:
+                raw_documents, document_status = [], "error"
+                document_error = "Identity document detection failed locally."
+        document_ms = max(0, round((time.perf_counter() - document_started) * 1000))
+        document_regions = self._privacy_results(raw_documents, decoded.width, decoded.height)
+
         context_started = time.perf_counter()
-        main_subject = self._subject_analyzer.analyze(faces, detections)
+        context_faces = self._exclude_document_faces(faces, document_regions)
+        main_subject = self._subject_analyzer.analyze(context_faces, detections)
         context_ms = max(0, round((time.perf_counter() - context_started) * 1000))
 
         ocr_started = time.perf_counter()
@@ -208,7 +252,16 @@ class DetectionService:
         sensitive_started = time.perf_counter()
         sensitive_items = self._sensitive_text_classifier.classify(texts, plates, cards) if ocr_status == "completed" else []
         sensitive_ms = max(0, round((time.perf_counter() - sensitive_started) * 1000))
-        total_ms = max(0, round((time.perf_counter() - total_started) * 1000))
+        classification_started = time.perf_counter()
+        documents = [
+            self._document_classifier.classify(
+                document_id=index, model_class=region.class_name, model_confidence=region.confidence,
+                bounding_box=region.bounding_box, image_width=decoded.width, image_height=decoded.height,
+                texts=texts, sensitive_items=sensitive_items,
+            )
+            for index, region in enumerate(document_regions, start=1)
+        ]
+        document_classification_ms = max(0, round((time.perf_counter() - classification_started) * 1000))
         objects = ObjectDetectionDetails(model=self._settings.yolo_model_name, detection_count=len(detections), detections=detections)
         image_details = ImageDetails(
             filename=filename, width=decoded.width, height=decoded.height, format=decoded.format,
@@ -219,9 +272,15 @@ class DetectionService:
                 "face_detection": "error" if face_error else "completed",
                 "license_plate_detection": plate_status,
                 "card_detection": card_status,
+                "document_detection": document_status,
                 "ocr": ocr_status,
             },
+            documents=documents,
         )
+        background_face_count = sum(
+            face.role in {"background_face", "unclassified"} for face in faces
+        )
+        total_ms = max(0, round((time.perf_counter() - total_started) * 1000))
         return AnalysisResponse(
             image=image_details,
             analysis=AnalysisDetails(
@@ -249,6 +308,25 @@ class DetectionService:
                     supported_classes=sorted(CardDetector.supported_classes),
                     diagnostics=card_diagnostics,
                 ),
+                document_detection=DocumentDetectionDetails(
+                    status=document_status,
+                    detector=getattr(self._document_detector, "name", "model_required"),
+                    document_count=len(documents), documents=documents,
+                    message=document_error or (
+                        "Dedicated document model required." if document_status == "unavailable" else None
+                    ),
+                    model_source=self._settings.document_model_source or None,
+                    model_license=self._settings.document_model_license or None,
+                    model_class_names=getattr(self._document_detector, "model_class_names", []),
+                    confidence_threshold=getattr(
+                        self._document_detector, "confidence_threshold",
+                        self._settings.document_confidence_threshold,
+                    ),
+                    inference_image_size=getattr(
+                        self._document_detector, "inference_image_size",
+                        self._settings.document_inference_image_size,
+                    ),
+                ),
                 ocr=OCRDetails(
                     status=ocr_status, engine=self._ocr_service.name, languages=list(self._settings.ocr_languages),
                     text_count=len(texts), texts=texts, message=ocr_error,
@@ -257,11 +335,18 @@ class DetectionService:
                     status=ocr_status, count=len(sensitive_items), items=sensitive_items, message=ocr_error,
                 ),
                 privacy_risk=privacy_risk,
+                privacy_sensitive_elements=PrivacySensitiveElements(
+                    background_faces=background_face_count, license_plates=len(plates),
+                    payment_cards=len(cards), identity_documents=len(documents),
+                    sensitive_text=len(sensitive_items),
+                ),
             ),
             performance=PerformanceDetails(
                 inference_time_ms=object_ms, object_detection_ms=object_ms,
                 face_detection_ms=face_ms, total_analysis_ms=total_ms,
                 license_plate_detection_ms=plate_ms, card_detection_ms=card_ms,
+                document_detection_ms=document_ms,
+                document_classification_ms=document_classification_ms,
                 context_analysis_ms=context_ms,
                 ocr_detection_ms=ocr_ms, sensitive_text_analysis_ms=sensitive_ms,
             ),
@@ -288,7 +373,17 @@ def get_detection_service() -> DetectionService:
     except RuntimeError:
         card_detector = None
     try:
+        document_detector = DocumentDetector(
+            settings.document_model_path, settings.document_confidence_threshold,
+            settings.document_inference_image_size,
+        )
+    except RuntimeError:
+        document_detector = None
+    try:
         ocr_service = OCRService(list(settings.ocr_languages), settings.ocr_model_directory)
     except RuntimeError:
         ocr_service = UnavailableOCRService()
-    return DetectionService(detector, face_detector, settings, plate_detector, card_detector, ocr_service)
+    return DetectionService(
+        detector, face_detector, settings, plate_detector, card_detector, ocr_service,
+        document_detector,
+    )

@@ -14,6 +14,7 @@ const defaultPrivacySettings = {
   protect_background_faces: true,
   protect_license_plates: true,
   protect_cards: true,
+  protect_identity_documents: true,
   protect_sensitive_text: true,
   anonymization_method: 'blur',
   strength: 'medium',

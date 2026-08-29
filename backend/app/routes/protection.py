@@ -52,18 +52,20 @@ def _protect(decoded: DecodedImage, analysis: AnalysisResponse, settings: Protec
         "face_detection": details.face_detection.status,
         "license_plate_detection": details.license_plate_detection.status,
         "card_detection": details.card_detection.status,
+        "document_detection": details.document_detection.status,
         "ocr": details.ocr.status,
     }
     engine = PrivacyRiskEngine()
     before = engine.calculate(
         analysis.image, details.face_detection.faces, details.main_subject,
         details.license_plate_detection.plates, details.card_detection.cards,
-        details.sensitive_text.items, statuses,
+        details.sensitive_text.items, statuses, documents=details.document_detection.documents,
     )
     after = engine.calculate(
         analysis.image, details.face_detection.faces, details.main_subject,
         details.license_plate_detection.plates, details.card_detection.cards,
         details.sensitive_text.items, statuses, settings, result.protection,
+        documents=details.document_detection.documents,
     )
     result.protection.risk = engine.compare(before, after)
     return result, _encode_image(decoded, result.pixels_bgr)

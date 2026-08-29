@@ -72,16 +72,23 @@ class Settings:
     card_model_path: Path = Path(
         os.getenv("CARD_MODEL_PATH", str(BACKEND_DIR / "models" / "card_detector.pt"))
     )
+    document_model_path: Path = Path(
+        os.getenv("DOCUMENT_MODEL_PATH", str(BACKEND_DIR / "models" / "document_detector.pt"))
+    )
     privacy_object_confidence_threshold: float = float(os.getenv("PRIVACY_OBJECT_CONFIDENCE_THRESHOLD", "0.35"))
     card_confidence_threshold: float = _bounded_float_setting("CARD_CONFIDENCE_THRESHOLD", "0.25")
     card_inference_image_size: int = _image_size_setting("CARD_INFERENCE_IMAGE_SIZE", "960")
     card_tile_size: int = _image_size_setting("CARD_TILE_SIZE", "640")
     card_tile_inference_image_size: int = _image_size_setting("CARD_TILE_INFERENCE_IMAGE_SIZE", "640")
     card_tile_overlap: float = _bounded_float_setting("CARD_TILE_OVERLAP", "0.40")
+    document_confidence_threshold: float = _bounded_float_setting("DOCUMENT_CONFIDENCE_THRESHOLD", "0.35")
+    document_inference_image_size: int = _image_size_setting("DOCUMENT_INFERENCE_IMAGE_SIZE", "960")
     license_plate_model_source: str = os.getenv("LICENSE_PLATE_MODEL_SOURCE", "")
     card_model_source: str = os.getenv(
         "CARD_MODEL_SOURCE", "https://huggingface.co/lambdaWalker/creditCardDetection"
     )
+    document_model_source: str = os.getenv("DOCUMENT_MODEL_SOURCE", "")
+    document_model_license: str = os.getenv("DOCUMENT_MODEL_LICENSE", "")
     app_environment: str = os.getenv("APP_ENV", "development").strip().lower()
     subject_size_weight: float = 0.45
     subject_center_weight: float = 0.25

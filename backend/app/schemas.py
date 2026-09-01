@@ -184,6 +184,55 @@ class DocumentDetectionDetails(BaseModel):
     inference_image_size: int = Field(default=960, gt=0)
 
 
+CodeContentType = Literal["url", "payment", "contact", "wifi", "text", "identifier", "unknown"]
+CodePrivacyLevel = Literal["low", "moderate", "high", "critical"]
+CodeParentType = Literal["identity_document", "payment_card"]
+
+
+class QRCodeResult(BaseModel):
+    qr_id: int = Field(gt=0)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    bounding_box: BoundingBox
+    polygon: list[Point] = Field(min_length=4, max_length=4)
+    decoded: bool
+    content_type: CodeContentType
+    masked_preview: str
+    privacy_level: CodePrivacyLevel
+    parent_type: CodeParentType | None = None
+    parent_id: int | None = Field(default=None, gt=0)
+
+
+class BarcodeResult(BaseModel):
+    barcode_id: int = Field(gt=0)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    format: str | None = None
+    bounding_box: BoundingBox
+    polygon: list[Point] = Field(min_length=4, max_length=4)
+    decoded: bool
+    content_type: CodeContentType
+    masked_preview: str
+    privacy_level: CodePrivacyLevel
+    parent_type: CodeParentType | None = None
+    parent_id: int | None = Field(default=None, gt=0)
+
+
+class QRDetectionDetails(BaseModel):
+    status: Literal["completed", "error", "unavailable"]
+    detector: str
+    qr_count: int = Field(ge=0)
+    items: list[QRCodeResult]
+    message: str | None = None
+
+
+class BarcodeDetectionDetails(BaseModel):
+    status: Literal["completed", "error", "unavailable"]
+    detector: str
+    barcode_count: int = Field(ge=0)
+    items: list[BarcodeResult]
+    supported_formats: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
 class OCRTextResult(BaseModel):
     text_id: int = Field(gt=0)
     raw_text: str
@@ -231,6 +280,8 @@ class RiskBreakdown(BaseModel):
     license_plates: int = Field(default=0, ge=0)
     payment_cards: int = Field(default=0, ge=0)
     identity_documents: int = Field(default=0, ge=0)
+    qr_codes: int = Field(default=0, ge=0)
+    barcodes: int = Field(default=0, ge=0)
     sensitive_text: int = Field(default=0, ge=0)
     context_uncertainty: int = Field(default=0, ge=0)
 
@@ -239,7 +290,7 @@ class RiskFactor(BaseModel):
     type: str
     category: Literal[
         "background_faces", "license_plates", "payment_cards",
-        "identity_documents", "sensitive_text", "context_uncertainty",
+        "identity_documents", "qr_codes", "barcodes", "sensitive_text", "context_uncertainty",
     ]
     severity: Literal["low", "medium", "high", "critical"]
     contribution: float = Field(ge=0, le=100)
@@ -267,6 +318,8 @@ class PrivacySensitiveElements(BaseModel):
     license_plates: int = Field(default=0, ge=0)
     payment_cards: int = Field(default=0, ge=0)
     identity_documents: int = Field(default=0, ge=0)
+    qr_codes: int = Field(default=0, ge=0)
+    barcodes: int = Field(default=0, ge=0)
     sensitive_text: int = Field(default=0, ge=0)
 
 
@@ -285,6 +338,14 @@ class AnalysisDetails(BaseModel):
         status="unavailable", detector="model_required", document_count=0, documents=[],
         message="Dedicated document model required.",
     ))
+    qr_detection: QRDetectionDetails = Field(default_factory=lambda: QRDetectionDetails(
+        status="unavailable", detector="opencv_qrcode_detector", qr_count=0, items=[],
+        message="Local QR detector unavailable.",
+    ))
+    barcode_detection: BarcodeDetectionDetails = Field(default_factory=lambda: BarcodeDetectionDetails(
+        status="unavailable", detector="opencv_barcode_detector", barcode_count=0, items=[],
+        message="Local barcode detector unavailable.",
+    ))
     ocr: OCRDetails
     sensitive_text: SensitiveTextDetails
     # Optional on input so Day 8 analysis payloads remain valid for /protect.
@@ -301,6 +362,9 @@ class PerformanceDetails(BaseModel):
     card_detection_ms: int = Field(ge=0)
     document_detection_ms: int = Field(default=0, ge=0)
     document_classification_ms: int = Field(default=0, ge=0)
+    qr_detection_ms: int = Field(default=0, ge=0)
+    barcode_detection_ms: int = Field(default=0, ge=0)
+    code_classification_ms: int = Field(default=0, ge=0)
     context_analysis_ms: int = Field(ge=0)
     ocr_detection_ms: int = Field(ge=0)
     sensitive_text_analysis_ms: int = Field(ge=0)
@@ -321,6 +385,8 @@ class ProtectionSettings(BaseModel):
     protect_license_plates: bool = True
     protect_cards: bool = True
     protect_identity_documents: bool = True
+    protect_qr_codes: bool = True
+    protect_barcodes: bool = True
     protect_sensitive_text: bool = True
     anonymization_method: Literal["blur", "pixelate", "blackout"] = "blur"
     strength: Literal["low", "medium", "high"] = "medium"
@@ -331,6 +397,8 @@ class ProtectionBreakdown(BaseModel):
     license_plates: int = Field(default=0, ge=0)
     cards: int = Field(default=0, ge=0)
     identity_documents: int = Field(default=0, ge=0)
+    qr_codes: int = Field(default=0, ge=0)
+    barcodes: int = Field(default=0, ge=0)
     sensitive_text: int = Field(default=0, ge=0)
 
 

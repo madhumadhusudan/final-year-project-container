@@ -11,6 +11,7 @@ from app.config import Settings
 from app.detection.service import DetectionService, get_detection_service
 from app.detection.face_detector import RawFace
 from app.detection.face_detector import FaceDetector
+from app.detection.code_detector import RawCodeDetection
 from app.detection.privacy_object_detector import RawPrivacyObject
 from app.ocr.ocr_service import RawOCRText
 from app.schemas import RawDetection
@@ -63,6 +64,29 @@ class StaticOCRService:
         if self.fails:
             raise RuntimeError("private OCR detail")
         return self.results
+
+
+class StaticCodeDetector:
+    qr_name = "test_qr"
+    barcode_name = "test_barcode"
+    qr_available = True
+    barcode_available = True
+
+    def __init__(self, qr=None, barcodes=None, fail_qr=False, fail_barcode=False) -> None:
+        self.qr = qr or []
+        self.barcodes = barcodes or []
+        self.fail_qr = fail_qr
+        self.fail_barcode = fail_barcode
+
+    def detect_qr(self, image_bgr):
+        if self.fail_qr:
+            raise RuntimeError("private QR payload or error")
+        return self.qr
+
+    def detect_barcodes(self, image_bgr):
+        if self.fail_barcode:
+            raise RuntimeError("private barcode payload or error")
+        return self.barcodes
 
 
 class FailingService:
@@ -247,6 +271,47 @@ class DetectionServiceTests(unittest.TestCase):
         self.assertEqual(response.analysis.privacy_sensitive_elements.identity_documents, 2)
         self.assertGreaterEqual(response.performance.document_detection_ms, 0)
         self.assertGreaterEqual(response.performance.document_classification_ms, 0)
+
+    def test_qr_and_barcode_results_are_masked_associated_and_scored(self) -> None:
+        points = ((20.0, 20.0), (50.0, 20.0), (50.0, 50.0), (20.0, 50.0))
+        qr = RawCodeDetection(points, 20, 20, 50, 50, "upi://pay?pa=private@example&am=999")
+        barcode_points = ((75.0, 50.0), (112.0, 50.0), (112.0, 65.0), (75.0, 65.0))
+        barcode = RawCodeDetection(barcode_points, 75, 50, 112, 65, "5901234123457", "EAN-13")
+        document_detector = StaticPrivacyDetector([
+            RawPrivacyObject("id_card", 0.95, 5, 5, 65, 70),
+        ])
+        response = DetectionService(
+            StaticDetector([]), StaticFaceDetector(), test_settings(),
+            document_detector=document_detector,
+            code_detector=StaticCodeDetector([qr], [barcode]),
+        ).analyze(DecodedImage(np.zeros((80, 120, 3), dtype=np.uint8), 120, 80, "PNG"), "codes.png")
+        qr_details, barcode_details = response.analysis.qr_detection, response.analysis.barcode_detection
+        self.assertEqual((qr_details.status, qr_details.qr_count), ("completed", 1))
+        self.assertEqual((barcode_details.status, barcode_details.barcode_count), ("completed", 1))
+        self.assertEqual(qr_details.items[0].content_type, "payment")
+        self.assertEqual(qr_details.items[0].parent_type, "identity_document")
+        self.assertEqual(barcode_details.items[0].format, "EAN-13")
+        self.assertEqual(response.analysis.privacy_sensitive_elements.qr_codes, 1)
+        self.assertEqual(response.analysis.privacy_sensitive_elements.barcodes, 1)
+        serialized = response.model_dump_json()
+        self.assertNotIn("private@example", serialized)
+        self.assertNotIn("5901234123457", serialized)
+        self.assertGreater(response.analysis.privacy_risk.breakdown.qr_codes, 0)
+        self.assertGreaterEqual(response.performance.qr_detection_ms, 0)
+        self.assertGreaterEqual(response.performance.barcode_detection_ms, 0)
+        self.assertGreaterEqual(response.performance.code_classification_ms, 0)
+
+    def test_code_failures_are_isolated_and_mark_assessment_partial(self) -> None:
+        response = DetectionService(
+            StaticDetector([]), StaticFaceDetector(), test_settings(),
+            code_detector=StaticCodeDetector(fail_qr=True, fail_barcode=True),
+        ).analyze(DecodedImage(np.zeros((80, 120, 3), dtype=np.uint8), 120, 80, "PNG"), "codes.png")
+        self.assertEqual(response.analysis.qr_detection.status, "error")
+        self.assertEqual(response.analysis.barcode_detection.status, "error")
+        self.assertNotIn("private", response.analysis.qr_detection.message)
+        unavailable = response.analysis.privacy_risk.assessment.unavailable_modules
+        self.assertIn("qr_detection", unavailable)
+        self.assertIn("barcode_detection", unavailable)
 
 
 class AnalysisApiTests(unittest.TestCase):

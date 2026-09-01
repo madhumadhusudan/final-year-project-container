@@ -16,6 +16,8 @@ FACE_PADDING = 0.12
 PLATE_PADDING = 0.06
 CARD_PADDING = 0.04
 DOCUMENT_PADDING = 0.05
+QR_PADDING = 0.09
+BARCODE_PADDING = 0.06
 TEXT_PADDING = 0.08
 
 
@@ -97,7 +99,7 @@ class ImageAnonymizer:
         warnings: list[str] = []
         category_regions: dict[str, list[Region]] = {
             "background_faces": [], "license_plates": [], "cards": [],
-            "identity_documents": [], "sensitive_text": [],
+            "identity_documents": [], "qr_codes": [], "barcodes": [], "sensitive_text": [],
         }
 
         subject_identified = details.main_subject.status == "identified"
@@ -139,6 +141,28 @@ class ImageAnonymizer:
                 if (region := self._expanded(item.bounding_box, DOCUMENT_PADDING, width, height)) is not None
             ]
 
+        parent_regions = category_regions["identity_documents"] + category_regions["cards"]
+        covered_code_counts = {"qr_codes": 0, "barcodes": 0}
+        code_specs = (
+            (
+                "qr_codes", details.qr_detection.items, QR_PADDING,
+                settings.protect_qr_codes,
+            ),
+            (
+                "barcodes", details.barcode_detection.items, BARCODE_PADDING,
+                settings.protect_barcodes,
+            ),
+        )
+        for category, items, padding, enabled in code_specs:
+            for item in items:
+                region = self._expanded(item.bounding_box, padding, width, height)
+                if region is None:
+                    continue
+                if any(contains_region(parent, region) for parent in parent_regions):
+                    covered_code_counts[category] += 1
+                elif enabled:
+                    category_regions[category].append(region)
+
         if settings.protect_sensitive_text:
             text_regions = [
                 region for item in details.sensitive_text.items
@@ -147,6 +171,7 @@ class ImageAnonymizer:
             covering_regions = (
                 category_regions["identity_documents"]
                 + category_regions["cards"] + category_regions["license_plates"]
+                + category_regions["qr_codes"] + category_regions["barcodes"]
             )
             text_regions = [
                 region for region in text_regions
@@ -155,11 +180,14 @@ class ImageAnonymizer:
             category_regions["sensitive_text"] = merge_regions(text_regions)
 
         counts: dict[str, int] = {}
+        applied_counts: dict[str, int] = {}
         for category in (
-            "identity_documents", "cards", "license_plates", "sensitive_text", "background_faces",
+            "identity_documents", "cards", "license_plates", "qr_codes", "barcodes",
+            "sensitive_text", "background_faces",
         ):
             applied = sum(self._apply(image, region, settings) for region in category_regions[category])
-            counts[category] = applied
+            applied_counts[category] = applied
+            counts[category] = applied + covered_code_counts.get(category, 0)
 
         # Face preservation has final precedence over intersecting privacy boxes.
         if preserved_region is not None:
@@ -171,7 +199,7 @@ class ImageAnonymizer:
         metadata = ProtectionMetadata(
             method=settings.anonymization_method,
             strength=settings.strength,
-            regions_protected=sum(counts.values()),
+            regions_protected=sum(applied_counts.values()),
             breakdown=breakdown,
             main_subject_preserved=preserved_region is not None,
             warnings=warnings,

@@ -6,7 +6,8 @@ from dataclasses import dataclass, replace
 from typing import Iterable, Mapping
 
 from app.schemas import (
-    CardResult, DocumentResult, FaceResult, ImageDetails, MainSubjectDetails, PrivacyObjectResult,
+    BarcodeResult, CardResult, DocumentResult, FaceResult, ImageDetails, MainSubjectDetails,
+    PrivacyObjectResult, QRCodeResult,
     PrivacyRiskDetails, ProtectionMetadata, ProtectionSettings, RiskAssessment,
     RiskBreakdown, RiskFactor, RiskReductionDetails, RiskScoreSummary,
     SensitiveTextResult,
@@ -24,6 +25,7 @@ class RiskConfiguration:
     category_caps: tuple[tuple[str, float], ...] = (
         ("background_faces", 35.0), ("license_plates", 30.0),
         ("payment_cards", 35.0), ("identity_documents", 40.0),
+        ("qr_codes", 30.0), ("barcodes", 15.0),
         ("sensitive_text", 60.0),
         ("context_uncertainty", 10.0),
     )
@@ -71,6 +73,7 @@ class PrivacyRiskEngine:
             "plate": ((0.0005, 0.65), (0.002, 0.80), (0.01, 0.95), (1.01, 1.10)),
             "card": ((0.01, 0.75), (0.05, 0.90), (0.15, 1.0), (1.01, 1.08)),
             "document": ((0.01, 0.65), (0.05, 0.80), (0.15, 0.95), (1.01, 1.08)),
+            "code": ((0.0005, 0.70), (0.003, 0.85), (0.015, 1.0), (1.01, 1.08)),
             "text": ((0.0001, 0.75), (0.001, 0.90), (0.005, 1.0), (1.01, 1.08)),
         }[kind]
         return next(multiplier for upper_bound, multiplier in thresholds if ratio <= upper_bound)
@@ -301,6 +304,65 @@ class PrivacyRiskEngine:
             ))
         return candidates
 
+    def _code_candidates(
+        self, qr_codes: list[QRCodeResult], barcodes: list[BarcodeResult], image_area: int,
+    ) -> list[_Candidate]:
+        qr_weights = {
+            "payment": 18.0, "contact": 16.0, "wifi": 16.0, "url": 7.0,
+            "identifier": 9.0, "text": 7.0, "unknown": 8.0,
+        }
+        candidates: list[_Candidate] = []
+        for item in qr_codes:
+            visibility = self._visibility_multiplier(self._box_area_ratio(item, image_area), "code")
+            if item.parent_type == "identity_document":
+                contribution = 6.0 * visibility
+                factor_type = "document_qr"
+                reason = "A QR code is visible inside an identity document; only a limited readability bonus is added."
+            elif item.parent_type == "payment_card":
+                contribution = 4.0 * visibility
+                factor_type = "card_qr"
+                reason = "A QR code is visible inside a confirmed card region."
+            else:
+                contribution = qr_weights[item.content_type] * visibility
+                factor_type = f"qr_{item.content_type}"
+                descriptions = {
+                    "payment": "A locally decoded payment QR is visible.",
+                    "contact": "A QR encoding contact information is visible.",
+                    "wifi": "A QR encoding Wi-Fi credentials is visible.",
+                    "url": "A QR encoding a web address is visible.",
+                    "identifier": "A QR encoding an identifier is visible.",
+                    "text": "A QR encoding text is visible.",
+                    "unknown": "A QR code with unknown or undecodable content is visible.",
+                }
+                reason = descriptions[item.content_type]
+            candidates.append(_Candidate(
+                factor_type, "qr_codes", contribution, reason,
+                "QR code exposed", "Protect visible QR codes before sharing.",
+            ))
+
+        for item in barcodes:
+            visibility = self._visibility_multiplier(self._box_area_ratio(item, image_area), "code")
+            if item.parent_type == "identity_document":
+                contribution, factor_type = 4.0 * visibility, "document_barcode"
+                reason = "A barcode is visible inside an identity document; only a limited context bonus is added."
+            elif item.parent_type == "payment_card":
+                contribution, factor_type = 3.0 * visibility, "card_barcode"
+                reason = "A barcode is visible inside a confirmed card region."
+            elif item.decoded and item.format in {"EAN-8", "EAN-13", "UPC-A", "UPC-E"}:
+                contribution, factor_type = 2.0 * visibility, "product_barcode"
+                reason = "A decoded retail-format barcode is visible without sensitive parent context."
+            elif not item.decoded:
+                contribution, factor_type = 5.0 * visibility, "unknown_barcode"
+                reason = "A barcode with undecodable content is visible."
+            else:
+                contribution, factor_type = 6.0 * visibility, "identifier_barcode"
+                reason = "A barcode encoding an identifier is visible."
+            candidates.append(_Candidate(
+                factor_type, "barcodes", contribution, reason,
+                "Barcode exposed", "Protect sensitive or contextual barcodes before sharing.",
+            ))
+        return candidates
+
     @staticmethod
     def _protection_effectiveness(settings: ProtectionSettings) -> float:
         if settings.anonymization_method == "blackout":
@@ -321,6 +383,8 @@ class PrivacyRiskEngine:
             "license_plates": settings.protect_license_plates,
             "payment_cards": settings.protect_cards,
             "identity_documents": settings.protect_identity_documents,
+            "qr_codes": settings.protect_qr_codes,
+            "barcodes": settings.protect_barcodes,
             "sensitive_text": settings.protect_sensitive_text,
             "context_uncertainty": settings.protect_background_faces,
         }
@@ -329,6 +393,8 @@ class PrivacyRiskEngine:
             "license_plates": protection.breakdown.license_plates,
             "payment_cards": protection.breakdown.cards,
             "identity_documents": protection.breakdown.identity_documents,
+            "qr_codes": protection.breakdown.qr_codes,
+            "barcodes": protection.breakdown.barcodes,
             "sensitive_text": protection.breakdown.sensitive_text,
         }
         eligible_counts = {
@@ -338,7 +404,11 @@ class PrivacyRiskEngine:
         residual = []
         for candidate in candidates:
             fraction = 0.0
-            if toggle[candidate.category]:
+            if candidate.type.startswith("document_") and settings.protect_identity_documents:
+                fraction = min(1.0, actual_counts["identity_documents"])
+            elif candidate.type.startswith("card_") and settings.protect_cards:
+                fraction = min(1.0, actual_counts["payment_cards"])
+            elif toggle[candidate.category]:
                 if candidate.category == "context_uncertainty":
                     face_count = eligible_counts["background_faces"]
                     fraction = min(1.0, actual_counts["background_faces"] / max(1, face_count))
@@ -389,6 +459,8 @@ class PrivacyRiskEngine:
         category_messages = {
             "payment_cards": f"{counts.get('payment_cards', 0)} payment card(s) exposed",
             "identity_documents": f"{counts.get('identity_documents', 0)} identity document(s) exposed",
+            "qr_codes": f"{counts.get('qr_codes', 0)} QR code(s) exposed",
+            "barcodes": f"{counts.get('barcodes', 0)} barcode(s) exposed",
             "background_faces": f"{counts.get('background_faces', 0)} background face(s) visible",
             "license_plates": f"{counts.get('license_plates', 0)} license plate(s) exposed",
             "context_uncertainty": "Main subject is uncertain",
@@ -429,6 +501,8 @@ class PrivacyRiskEngine:
         protection_settings: ProtectionSettings | None = None,
         protection_metadata: ProtectionMetadata | None = None,
         documents: list[DocumentResult] | None = None,
+        qr_codes: list[QRCodeResult] | None = None,
+        barcodes: list[BarcodeResult] | None = None,
     ) -> PrivacyRiskDetails:
         """Calculate original or metadata-derived residual risk without rerunning detectors."""
         image_area = image_metadata.width * image_metadata.height
@@ -442,9 +516,10 @@ class PrivacyRiskEngine:
         text_candidates = self._text_candidates(
             texts, plate_text_ids | card_text_ids | document_text_ids, image_area,
         )
+        code_candidates = self._code_candidates(qr_codes or [], barcodes or [], image_area)
         candidates = (
             face_candidates + plate_candidates + card_candidates
-            + document_candidates + text_candidates
+            + document_candidates + code_candidates + text_candidates
         )
         if main_subject.status == "uncertain" and face_count:
             candidates.append(_Candidate(
@@ -457,6 +532,8 @@ class PrivacyRiskEngine:
             "license_plates": len(plates),
             "payment_cards": len(cards),
             "identity_documents": len(documents or []),
+            "qr_codes": len(qr_codes or []),
+            "barcodes": len(barcodes or []),
         }
         if protection_settings is not None and protection_metadata is not None:
             candidates = self._apply_protection(candidates, protection_settings, protection_metadata)

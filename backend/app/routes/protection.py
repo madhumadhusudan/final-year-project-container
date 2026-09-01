@@ -53,6 +53,8 @@ def _protect(decoded: DecodedImage, analysis: AnalysisResponse, settings: Protec
         "license_plate_detection": details.license_plate_detection.status,
         "card_detection": details.card_detection.status,
         "document_detection": details.document_detection.status,
+        "qr_detection": details.qr_detection.status,
+        "barcode_detection": details.barcode_detection.status,
         "ocr": details.ocr.status,
     }
     engine = PrivacyRiskEngine()
@@ -60,12 +62,14 @@ def _protect(decoded: DecodedImage, analysis: AnalysisResponse, settings: Protec
         analysis.image, details.face_detection.faces, details.main_subject,
         details.license_plate_detection.plates, details.card_detection.cards,
         details.sensitive_text.items, statuses, documents=details.document_detection.documents,
+        qr_codes=details.qr_detection.items, barcodes=details.barcode_detection.items,
     )
     after = engine.calculate(
         analysis.image, details.face_detection.faces, details.main_subject,
         details.license_plate_detection.plates, details.card_detection.cards,
         details.sensitive_text.items, statuses, settings, result.protection,
         documents=details.document_detection.documents,
+        qr_codes=details.qr_detection.items, barcodes=details.barcode_detection.items,
     )
     result.protection.risk = engine.compare(before, after)
     return result, _encode_image(decoded, result.pixels_bgr)

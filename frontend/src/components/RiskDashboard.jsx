@@ -13,6 +13,8 @@ const breakdownLabels = {
   license_plates: 'License Plates',
   payment_cards: 'Payment Cards',
   identity_documents: 'Identity Documents',
+  qr_codes: 'QR Codes',
+  barcodes: 'Barcodes',
   sensitive_text: 'Sensitive Text',
   context_uncertainty: 'Context Uncertainty',
 }

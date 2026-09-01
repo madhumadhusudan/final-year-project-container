@@ -5,6 +5,8 @@ const riskTypes = [
   ['protect_license_plates', 'Protect License Plates'],
   ['protect_cards', 'Protect Payment Cards'],
   ['protect_identity_documents', 'Protect Identity Documents'],
+  ['protect_qr_codes', 'Protect QR Codes'],
+  ['protect_barcodes', 'Protect Barcodes'],
   ['protect_sensitive_text', 'Protect Sensitive Text'],
 ]
 const protectionModes = [['blur', 'Blur'], ['pixelate', 'Pixelate'], ['blackout', 'Blackout']]
@@ -17,6 +19,8 @@ function PrivacyControls({ settings, onChange, onProtect, canProtect, protection
     analysis?.license_plate_detection?.status === 'unavailable' && 'Plate detector unavailable',
     analysis?.card_detection?.status === 'unavailable' && 'Card detector unavailable',
     analysis?.document_detection?.status !== 'completed' && analysis?.document_detection && 'Identity document detector unavailable',
+    analysis?.qr_detection?.status !== 'completed' && analysis?.qr_detection && 'QR detector unavailable',
+    analysis?.barcode_detection?.status !== 'completed' && analysis?.barcode_detection && 'Barcode detector unavailable',
     analysis?.sensitive_text?.status === 'unavailable' && 'OCR unavailable',
   ].filter(Boolean)
   return (
@@ -28,7 +32,7 @@ function PrivacyControls({ settings, onChange, onProtect, canProtect, protection
       <fieldset disabled={isProtecting} className="mt-6 space-y-2">
         <legend className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Information to protect</legend>
         {riskTypes.map(([key, label]) => {
-          const moduleUnavailable = (key === 'protect_cards' && analysis?.card_detection?.status === 'unavailable') || (key === 'protect_identity_documents' && analysis?.document_detection?.status !== 'completed' && Boolean(analysis?.document_detection))
+          const moduleUnavailable = (key === 'protect_cards' && analysis?.card_detection?.status === 'unavailable') || (key === 'protect_identity_documents' && analysis?.document_detection?.status !== 'completed' && Boolean(analysis?.document_detection)) || (key === 'protect_qr_codes' && analysis?.qr_detection?.status !== 'completed' && Boolean(analysis?.qr_detection)) || (key === 'protect_barcodes' && analysis?.barcode_detection?.status !== 'completed' && Boolean(analysis?.barcode_detection))
           return <label key={key} className={`flex min-h-11 items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium ${moduleUnavailable ? 'cursor-not-allowed text-slate-400' : 'text-slate-700'}`}><span>{label}{moduleUnavailable && <span className="ml-1 text-xs">(unavailable)</span>}</span><input type="checkbox" disabled={moduleUnavailable} checked={settings[key]} onChange={(event) => update(key, event.target.checked)} className="h-5 w-5 rounded border-slate-300 accent-teal-700" /></label>
         })}
       </fieldset>

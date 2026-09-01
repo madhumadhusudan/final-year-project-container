@@ -36,9 +36,12 @@ def analysis_response(
     *, faces: list[dict] | None = None, subject_status: str = "not_found", subject_face_id: int | None = None,
     plates: list[tuple[int, int, int, int]] | None = None, cards: list[tuple[int, int, int, int]] | None = None,
     documents: list[tuple[int, int, int, int]] | None = None,
+    qr_codes: list[tuple[int, int, int, int]] | None = None,
+    barcodes: list[tuple[int, int, int, int]] | None = None,
     texts: list[tuple[int, int, int, int]] | None = None,
 ) -> AnalysisResponse:
-    faces, plates, cards, documents, texts = faces or [], plates or [], cards or [], documents or [], texts or []
+    faces, plates, cards, documents = faces or [], plates or [], cards or [], documents or []
+    qr_codes, barcodes, texts = qr_codes or [], barcodes or [], texts or []
     box = lambda values: dict(zip(("x1", "y1", "x2", "y2"), values))
     privacy_items = lambda values, name: [
         {"id": index, "class_name": name, "confidence": 0.9, "bounding_box": box(item)}
@@ -59,6 +62,26 @@ def analysis_response(
         }
         for index, item in enumerate(documents, 1)
     ]
+    polygon = lambda item: [
+        {"x": item[0], "y": item[1]}, {"x": item[2], "y": item[1]},
+        {"x": item[2], "y": item[3]}, {"x": item[0], "y": item[3]},
+    ]
+    qr_items = [
+        {
+            "qr_id": index, "confidence": None, "bounding_box": box(item), "polygon": polygon(item),
+            "decoded": True, "content_type": "url", "masked_preview": "URL encoded (example.com)",
+            "privacy_level": "moderate",
+        }
+        for index, item in enumerate(qr_codes, 1)
+    ]
+    barcode_items = [
+        {
+            "barcode_id": index, "confidence": None, "format": "EAN-13",
+            "bounding_box": box(item), "polygon": polygon(item), "decoded": True,
+            "content_type": "identifier", "masked_preview": "********3457", "privacy_level": "low",
+        }
+        for index, item in enumerate(barcodes, 1)
+    ]
     return AnalysisResponse.model_validate({
         "image": {"filename": "test.png", "width": 100, "height": 80, "format": "PNG"},
         "analysis": {
@@ -69,6 +92,8 @@ def analysis_response(
             "license_plate_detection": {"status": "completed", "detector": "test", "plate_count": len(plates), "plates": privacy_items(plates, "license_plate")},
             "card_detection": {"status": "completed", "detector": "test", "card_count": len(cards), "cards": privacy_items(cards, "card")},
             "document_detection": {"status": "completed", "detector": "test", "document_count": len(documents), "documents": document_items},
+            "qr_detection": {"status": "completed", "detector": "test", "qr_count": len(qr_items), "items": qr_items},
+            "barcode_detection": {"status": "completed", "detector": "test", "barcode_count": len(barcode_items), "items": barcode_items},
             "ocr": {"status": "completed", "engine": "test", "languages": ["en"], "text_count": 0, "texts": []},
             "sensitive_text": {"status": "completed", "count": len(text_items), "items": text_items},
         },
@@ -180,7 +205,7 @@ class PrivacyRuleTests(unittest.TestCase):
         result = ImageAnonymizer().anonymize(gradient_image(), analysis, ProtectionSettings(anonymization_method="blackout"))
         self.assertEqual(result.protection.breakdown.model_dump(), {
             "background_faces": 1, "license_plates": 1, "cards": 1,
-            "identity_documents": 0, "sensitive_text": 1,
+            "identity_documents": 0, "qr_codes": 0, "barcodes": 0, "sensitive_text": 1,
         })
         self.assertEqual(result.protection.regions_protected, 4)
         self.assertTrue(result.protection.main_subject_preserved)
@@ -234,6 +259,54 @@ class PrivacyRuleTests(unittest.TestCase):
         )
         self.assertTrue(np.array_equal(disabled.pixels_bgr, original))
         self.assertEqual(disabled.protection.breakdown.identity_documents, 0)
+
+    def test_qr_and_barcode_methods_padding_and_toggles(self) -> None:
+        original = gradient_image()
+        original[15:60:2, 15:90:2] = 255
+        analysis = analysis_response(qr_codes=[(15, 15, 40, 40)], barcodes=[(55, 42, 90, 58)])
+        for method in ("blur", "pixelate", "blackout"):
+            with self.subTest(method=method):
+                result = ImageAnonymizer().anonymize(
+                    original, analysis, ProtectionSettings(anonymization_method=method),
+                )
+                self.assertEqual(result.protection.breakdown.qr_codes, 1)
+                self.assertEqual(result.protection.breakdown.barcodes, 1)
+                self.assertEqual(result.protection.regions_protected, 2)
+                self.assertFalse(np.array_equal(result.pixels_bgr[15:40, 15:40], original[15:40, 15:40]))
+                self.assertFalse(np.array_equal(result.pixels_bgr[42:58, 55:90], original[42:58, 55:90]))
+
+        for disabled_setting, disabled_category, enabled_category in (
+            ("protect_qr_codes", "qr_codes", "barcodes"),
+            ("protect_barcodes", "barcodes", "qr_codes"),
+        ):
+            with self.subTest(disabled_setting=disabled_setting):
+                toggled = ImageAnonymizer().anonymize(
+                    original, analysis,
+                    ProtectionSettings(**{disabled_setting: False, "anonymization_method": "blackout"}),
+                )
+                self.assertEqual(getattr(toggled.protection.breakdown, disabled_category), 0)
+                self.assertEqual(getattr(toggled.protection.breakdown, enabled_category), 1)
+
+        disabled = ImageAnonymizer().anonymize(
+            original, analysis,
+            ProtectionSettings(
+                protect_qr_codes=False, protect_barcodes=False, anonymization_method="blackout",
+            ),
+        )
+        self.assertTrue(np.array_equal(disabled.pixels_bgr, original))
+
+    def test_document_precedence_protects_contained_codes_once(self) -> None:
+        analysis = analysis_response(
+            documents=[(10, 10, 90, 70)], qr_codes=[(25, 20, 42, 38)],
+            barcodes=[(50, 45, 75, 57)],
+        )
+        result = ImageAnonymizer().anonymize(
+            gradient_image(), analysis, ProtectionSettings(anonymization_method="blackout"),
+        )
+        self.assertEqual(result.protection.breakdown.identity_documents, 1)
+        self.assertEqual(result.protection.breakdown.qr_codes, 1)
+        self.assertEqual(result.protection.breakdown.barcodes, 1)
+        self.assertEqual(result.protection.regions_protected, 1)
 
 
 class ProtectionApiTests(unittest.TestCase):

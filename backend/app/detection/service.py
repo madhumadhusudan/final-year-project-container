@@ -7,16 +7,18 @@ from functools import lru_cache
 
 from app.config import Settings, settings
 from app.schemas import (
-    AnalysisDetails, AnalysisResponse, BoundingBox, CardDetectionDetails, CardResult, DetectionResult,
-    DetectorDiagnostics, DocumentDetectionDetails,
+    AnalysisDetails, AnalysisResponse, BarcodeDetectionDetails, BarcodeResult, BoundingBox,
+    CardDetectionDetails, CardResult, DetectionResult, DetectorDiagnostics, DocumentDetectionDetails,
     FaceDetectionDetails, FaceResult, ImageDetails, LicensePlateDetectionDetails,
     ObjectDetectionDetails, OCRDetails, OCRTextResult, PerformanceDetails, Point,
-    PrivacyObjectResult, PrivacySensitiveElements, SensitiveTextDetails,
+    PrivacyObjectResult, PrivacySensitiveElements, QRCodeResult, QRDetectionDetails, SensitiveTextDetails,
 )
+from app.context.code_context import associate_code
 from app.context.main_subject_analyzer import MainSubjectAnalyzer
 from app.ocr.ocr_service import OCRService, UnavailableOCRService
 from app.privacy.sensitive_text_classifier import SensitiveTextClassifier
 from app.privacy.document_classifier import DocumentClassifier
+from app.privacy.code_content_classifier import CodeContentClassifier
 from app.privacy.risk_score import PrivacyRiskEngine
 from app.utils.image_validation import DecodedImage
 
@@ -25,23 +27,27 @@ from .face_detector import FaceDetector, UnavailableFaceDetector
 from .card_detector import CardDetector
 from .license_plate_detector import LicensePlateDetector
 from .document_detector import DocumentDetector
+from .code_detector import CodeDetector
 
 
 class DetectionService:
     def __init__(self, detector: YoloDetector, face_detector: FaceDetector, app_settings: Settings = settings,
                  plate_detector: LicensePlateDetector | None = None, card_detector: CardDetector | None = None,
                  ocr_service: OCRService | UnavailableOCRService | None = None,
-                 document_detector: DocumentDetector | None = None) -> None:
+                 document_detector: DocumentDetector | None = None,
+                 code_detector: CodeDetector | None = None) -> None:
         self._detector = detector
         self._face_detector = face_detector
         self._settings = app_settings
         self._plate_detector = plate_detector
         self._card_detector = card_detector
         self._document_detector = document_detector
+        self._code_detector = code_detector
         self._subject_analyzer = MainSubjectAnalyzer(app_settings)
         self._ocr_service = ocr_service or UnavailableOCRService()
         self._sensitive_text_classifier = SensitiveTextClassifier()
         self._document_classifier = DocumentClassifier()
+        self._code_classifier = CodeContentClassifier()
         self._risk_engine = PrivacyRiskEngine()
 
     @staticmethod
@@ -101,6 +107,39 @@ class DetectionService:
             else:
                 external_faces.append(face)
         return external_faces
+
+    def _code_results(
+        self, raw_items, image_width: int, image_height: int, documents, cards, *, kind: str,
+    ) -> list[QRCodeResult] | list[BarcodeResult]:
+        results = []
+        for raw in raw_items:
+            box = BoundingBox(x1=raw.x1, y1=raw.y1, x2=raw.x2, y2=raw.y2)
+            parent_type, parent_id = associate_code(box, documents, cards)
+            safe_content = self._code_classifier.classify(
+                raw.payload, code_kind=kind, barcode_format=raw.format,
+            )
+            common = {
+                "confidence": None,
+                "bounding_box": box,
+                "polygon": [Point(x=point[0], y=point[1]) for point in raw.polygon],
+                "decoded": raw.payload is not None,
+                "content_type": safe_content.content_type,
+                "masked_preview": safe_content.masked_preview,
+                "privacy_level": self._code_classifier.privacy_level(
+                    code_kind=kind, content_type=safe_content.content_type,
+                    decoded=raw.payload is not None, barcode_format=raw.format,
+                    parent_type=parent_type,
+                ),
+                "parent_type": parent_type,
+                "parent_id": parent_id,
+            }
+            if kind == "qr":
+                results.append(QRCodeResult(qr_id=len(results) + 1, **common))
+            else:
+                results.append(BarcodeResult(
+                    barcode_id=len(results) + 1, format=raw.format, **common,
+                ))
+        return results
 
     def analyze(self, decoded: DecodedImage, filename: str) -> AnalysisResponse:
         total_started = time.perf_counter()
@@ -225,6 +264,32 @@ class DetectionService:
         document_ms = max(0, round((time.perf_counter() - document_started) * 1000))
         document_regions = self._privacy_results(raw_documents, decoded.width, decoded.height)
 
+        qr_started = time.perf_counter()
+        qr_error = None
+        if self._code_detector is None or not self._code_detector.qr_available:
+            raw_qr_codes, qr_status = [], "unavailable"
+        else:
+            try:
+                raw_qr_codes = self._code_detector.detect_qr(decoded.pixels_bgr)
+                qr_status = "completed"
+            except RuntimeError:
+                raw_qr_codes, qr_status = [], "error"
+                qr_error = "Local QR detection failed for this image."
+        qr_ms = max(0, round((time.perf_counter() - qr_started) * 1000))
+
+        barcode_started = time.perf_counter()
+        barcode_error = None
+        if self._code_detector is None or not self._code_detector.barcode_available:
+            raw_barcodes, barcode_status = [], "unavailable"
+        else:
+            try:
+                raw_barcodes = self._code_detector.detect_barcodes(decoded.pixels_bgr)
+                barcode_status = "completed"
+            except RuntimeError:
+                raw_barcodes, barcode_status = [], "error"
+                barcode_error = "Local barcode detection failed for this image."
+        barcode_ms = max(0, round((time.perf_counter() - barcode_started) * 1000))
+
         context_started = time.perf_counter()
         context_faces = self._exclude_document_faces(faces, document_regions)
         main_subject = self._subject_analyzer.analyze(context_faces, detections)
@@ -262,6 +327,14 @@ class DetectionService:
             for index, region in enumerate(document_regions, start=1)
         ]
         document_classification_ms = max(0, round((time.perf_counter() - classification_started) * 1000))
+        code_classification_started = time.perf_counter()
+        qr_codes = self._code_results(
+            raw_qr_codes, decoded.width, decoded.height, documents, cards, kind="qr",
+        )
+        barcodes = self._code_results(
+            raw_barcodes, decoded.width, decoded.height, documents, cards, kind="barcode",
+        )
+        code_classification_ms = max(0, round((time.perf_counter() - code_classification_started) * 1000))
         objects = ObjectDetectionDetails(model=self._settings.yolo_model_name, detection_count=len(detections), detections=detections)
         image_details = ImageDetails(
             filename=filename, width=decoded.width, height=decoded.height, format=decoded.format,
@@ -273,9 +346,13 @@ class DetectionService:
                 "license_plate_detection": plate_status,
                 "card_detection": card_status,
                 "document_detection": document_status,
+                "qr_detection": qr_status,
+                "barcode_detection": barcode_status,
                 "ocr": ocr_status,
             },
             documents=documents,
+            qr_codes=qr_codes,
+            barcodes=barcodes,
         )
         background_face_count = sum(
             face.role in {"background_face", "unclassified"} for face in faces
@@ -327,6 +404,25 @@ class DetectionService:
                         self._settings.document_inference_image_size,
                     ),
                 ),
+                qr_detection=QRDetectionDetails(
+                    status=qr_status,
+                    detector=getattr(self._code_detector, "qr_name", "opencv_qrcode_detector"),
+                    qr_count=len(qr_codes),
+                    items=qr_codes,
+                    message=qr_error or (
+                        "OpenCV QRCodeDetector is unavailable." if qr_status == "unavailable" else None
+                    ),
+                ),
+                barcode_detection=BarcodeDetectionDetails(
+                    status=barcode_status,
+                    detector=getattr(self._code_detector, "barcode_name", "opencv_barcode_detector"),
+                    barcode_count=len(barcodes),
+                    items=barcodes,
+                    supported_formats=list(CodeDetector.supported_barcode_formats),
+                    message=barcode_error or (
+                        "OpenCV BarcodeDetector is unavailable." if barcode_status == "unavailable" else None
+                    ),
+                ),
                 ocr=OCRDetails(
                     status=ocr_status, engine=self._ocr_service.name, languages=list(self._settings.ocr_languages),
                     text_count=len(texts), texts=texts, message=ocr_error,
@@ -338,6 +434,7 @@ class DetectionService:
                 privacy_sensitive_elements=PrivacySensitiveElements(
                     background_faces=background_face_count, license_plates=len(plates),
                     payment_cards=len(cards), identity_documents=len(documents),
+                    qr_codes=len(qr_codes), barcodes=len(barcodes),
                     sensitive_text=len(sensitive_items),
                 ),
             ),
@@ -347,6 +444,8 @@ class DetectionService:
                 license_plate_detection_ms=plate_ms, card_detection_ms=card_ms,
                 document_detection_ms=document_ms,
                 document_classification_ms=document_classification_ms,
+                qr_detection_ms=qr_ms, barcode_detection_ms=barcode_ms,
+                code_classification_ms=code_classification_ms,
                 context_analysis_ms=context_ms,
                 ocr_detection_ms=ocr_ms, sensitive_text_analysis_ms=sensitive_ms,
             ),
@@ -383,7 +482,8 @@ def get_detection_service() -> DetectionService:
         ocr_service = OCRService(list(settings.ocr_languages), settings.ocr_model_directory)
     except RuntimeError:
         ocr_service = UnavailableOCRService()
+    code_detector = CodeDetector()
     return DetectionService(
         detector, face_detector, settings, plate_detector, card_detector, ocr_service,
-        document_detector,
+        document_detector, code_detector,
     )

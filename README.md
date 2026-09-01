@@ -2,7 +2,7 @@
 
 Context-aware, local image anonymization for safer social-media sharing. This B.E. final-year project detects privacy risks, identifies a likely main subject, and selectively protects only sensitive regions.
 
-> **Current status: Day 10 — Identity-Document Privacy Pipeline**
+> **Current status: Day 11 — QR and Barcode Privacy Pipeline**
 
 ## What Works
 
@@ -21,15 +21,20 @@ Context-aware, local image anonymization for safer social-media sharing. This B.
 - Original-versus-residual risk calculation from successful protection metadata, including point and percentage reduction.
 - Dedicated local identity-document detector contract with strict model-native label validation and honest unavailable/error states.
 - Explainable OCR-assisted Aadhaar/PAN/passport/driving-licence classification, printed-document-face filtering, document risk, responsive overlays, and whole-document protection.
+- Real local OpenCV QR detection/decoding with multiple-code support, polygon geometry, safe URL/payment/contact/Wi-Fi classification, and masked previews.
+- Real local OpenCV barcode detection/decoding for EAN-8, EAN-13, UPC-A, and UPC-E, with honest format/decode status and low-risk handling for standalone retail codes.
+- Document/card spatial association, grouped QR/barcode risk, independent overlay/protection controls, padded code anonymization, and explicit module failure states.
 - No permanent image storage and no external image-processing APIs.
 
-## Day 10 Pipeline
+## Day 11 Pipeline
 
 ```text
 Upload and validate image
   → local object, face, plate, card, and OCR analysis
   → optional dedicated identity-document detection
   → OCR-assisted document classification and document-photo face filtering
+  → local QR and barcode region detection with optional local decode
+  → safe payload classification and document/card spatial association
   → main-subject/context classification
   → privacy-risk feature extraction, grouping, and deterministic scoring
   → user privacy settings
@@ -43,24 +48,26 @@ Upload and validate image
 
 `POST /analyze` returns the analysis once. `POST /protect` receives that analysis with the same original image and validates matching dimensions, so expensive detectors are not rerun. The protected image is returned directly as binary data; compact protection metadata is exposed in `X-Protection-Metadata`. No result database or permanent output file is used.
 
-The risk score uses only detected privacy evidence. A confidently selected main subject adds no face risk; background/unclassified faces, plates, cards, identity documents, classified sensitive text, and main-subject uncertainty do. Confidence uses the bounded multiplier `0.7 + 0.3 × confidence`. Visibility uses bounded size bands tailored to each region type. Document bases are Aadhaar-like 28, PAN-like 23, passport 28, driving licence 23, and generic identity document 20, with a limited six-point OCR/readability bonus. Category caps are faces 35, plates 30, cards 35, identity documents 40, sensitive text 60, and context 10. Final totals are clamped to 100.
+The risk score uses only detected privacy evidence. A confidently selected main subject adds no face risk; background/unclassified faces, plates, cards, identity documents, QR codes, barcodes, classified sensitive text, and main-subject uncertainty do. QR risk depends on safe content category and context. Standalone decoded retail barcodes remain low risk, while undecodable or context-associated codes remain protectable. Identity-document codes add only a limited readability/context bonus instead of duplicating the full document risk. Final totals are clamped to 100.
 
 Related detections are grouped: readable plate OCR is a limited plate bonus, card number/expiry OCR is a limited card bonus, address and PIN code form one address exposure, and overlapping or matching masked OCR classifications are deduplicated. Missing or failed face, plate, card, or OCR modules produce a visible `partial` assessment instead of implying a comprehensive zero-risk result.
 
 Region precedence is:
 
-1. Full payment-card and plate regions cover sensitive OCR regions contained inside them.
-2. Overlapping/adjacent remaining sensitive-text regions are merged.
-3. Face regions remain independently protected.
-4. The confidently identified main-subject face is restored last, preventing accidental anonymization from overlaps.
+1. Full identity-document, payment-card, and plate regions take precedence.
+2. QR and barcode regions use safety padding and are skipped when a protected parent already covers them.
+3. Full parent/code regions cover sensitive OCR regions contained inside them.
+4. Overlapping/adjacent remaining sensitive-text regions are merged.
+5. Face regions remain independently protected.
+6. The confidently identified main-subject face is restored last, preventing accidental anonymization from overlaps.
 
 ## Repository Structure
 
 ```text
 backend/
   app/anonymization/           Safe region utilities and ImageAnonymizer
-  app/context/                 Main-subject analysis
-  app/detection/               YOLO, YuNet, plate, and card detectors
+  app/context/                 Main-subject and code-parent association
+  app/detection/               YOLO, YuNet, plate, card, document, QR, and barcode detectors
   app/ocr/                     Local OCR and text normalization
   app/privacy/                 Sensitive-text/document classification and privacy-risk scoring
   app/routes/                  /analyze and /protect
@@ -137,6 +144,8 @@ Default protection settings:
   "protect_license_plates": true,
   "protect_cards": true,
   "protect_identity_documents": true,
+  "protect_qr_codes": true,
+  "protect_barcodes": true,
   "protect_sensitive_text": true,
   "anonymization_method": "blur",
   "strength": "medium"
@@ -156,6 +165,8 @@ The protection metadata header decodes to:
     "license_plates": 1,
     "cards": 1,
     "identity_documents": 1,
+    "qr_codes": 2,
+    "barcodes": 1,
     "sensitive_text": 1
   },
   "main_subject_preserved": true,
@@ -182,7 +193,7 @@ npm.cmd test
 npm.cmd run build
 ```
 
-Day 10 adds safe synthetic tests for strict detector labels, Aadhaar/PAN OCR support, passport/driving-licence labels, generic-document uncertainty, false-positive class rejection, original-coordinate boxes, multiple document IDs, printed-document-face filtering, OCR grouping, visibility-weighted risk, partial assessment, whole-region blur/pixelate/blackout, toggles, API metadata, and responsive overlays. All Day 1–9 regression tests remain active.
+Day 11 adds safe synthetic tests for real multi-QR detection, URL/payment/contact/Wi-Fi decoding, masking, malicious-looking payload handling, EAN-13 decoding, product-barcode risk, unknown decode behavior, document/card association, grouped risk, module failure states, padding, precedence, blur/pixelate/blackout, and independent toggles. All Day 1–10 regression tests remain active.
 
 ## Privacy and Limitations
 
@@ -193,6 +204,8 @@ Day 10 adds safe synthetic tests for strict detector labels, Aadhaar/PAN OCR sup
 - Detection quality depends on local models, lighting, pose, scale, occlusion, and OCR quality.
 - Dedicated plate and payment-card detection cannot run until compatible local weights are supplied.
 - Identity-document detection remains unavailable until a provenance-reviewed compatible local checkpoint is configured; the application does not ship or download one automatically.
+- QR and barcode quality depends on code size, quiet zones, rotation, perspective, blur, and occlusion. OpenCV may detect a region without decoding it; this is reported as `decoded: false`, never as safe.
+- Decoded code payloads are transient local strings. The API/UI returns only safe categories and masked previews; it never opens URLs, initiates payments, connects to Wi-Fi, executes payload text, or sends it to a cloud service.
 - Risk is a calibrated exposure indicator, not a probability of harm or a guarantee that unavailable detectors would find nothing.
 - Residual risk is derived from protection settings and successful-region metadata; detectors are intentionally not rerun on the altered image.
-- No identity verification, authenticity checking, face recognition, GAN replacement, generative inpainting, authentication, database, cloud storage, publishing, video, or live-camera processing is included in Day 10.
+- No identity verification, authenticity checking, face recognition, GAN replacement, generative inpainting, authentication, database, cloud storage, publishing, video, or live-camera processing is included in Day 11.

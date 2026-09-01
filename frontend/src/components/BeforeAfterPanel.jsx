@@ -5,6 +5,8 @@ const labels = {
   license_plates: ['license plate', 'license plates'],
   cards: ['payment card', 'payment cards'],
   identity_documents: ['identity document', 'identity documents'],
+  qr_codes: ['QR code', 'QR codes'],
+  barcodes: ['barcode', 'barcodes'],
   sensitive_text: ['sensitive text region', 'sensitive text regions'],
 }
 
@@ -26,7 +28,7 @@ function BeforeAfterPanel({ originalUrl, protectedUrl, filename, protection, onD
         <figure className="min-w-0"><figcaption className="mb-2 text-sm font-bold text-slate-700">Original</figcaption><div className="grid min-h-64 place-items-center overflow-hidden rounded-2xl bg-slate-100 ring-1 ring-slate-200"><img src={originalUrl} alt={`Original ${filename}`} className="block max-h-[36rem] max-w-full object-contain" /></div></figure>
         <figure className="min-w-0"><figcaption className="mb-2 text-sm font-bold text-teal-800">Protected</figcaption><div className="grid min-h-64 place-items-center overflow-hidden rounded-2xl bg-slate-100 ring-1 ring-teal-200"><img src={protectedUrl} alt={`Privacy-protected ${filename}`} className="block max-h-[36rem] max-w-full object-contain" /></div></figure>
       </div>
-      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {Object.entries(labels).map(([key, [singular, plural]]) => { const count = protection.breakdown?.[key] || 0; return <div key={key} className="rounded-xl bg-slate-50 p-3 text-sm"><span className="font-bold text-slate-950">{count}</span> <span className="text-slate-600">{count === 1 ? singular : plural}</span></div> })}
         <div className={`flex items-center gap-2 rounded-xl p-3 text-sm font-semibold ${protection.main_subject_preserved ? 'bg-teal-50 text-teal-900' : 'bg-slate-50 text-slate-600'}`}><CheckIcon className="h-4 w-4" />{protection.main_subject_preserved ? 'Main subject preserved' : 'No confirmed main subject'}</div>
       </div>

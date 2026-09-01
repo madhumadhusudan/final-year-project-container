@@ -15,6 +15,8 @@ const defaultPrivacySettings = {
   protect_license_plates: true,
   protect_cards: true,
   protect_identity_documents: true,
+  protect_qr_codes: true,
+  protect_barcodes: true,
   protect_sensitive_text: true,
   anonymization_method: 'blur',
   strength: 'medium',

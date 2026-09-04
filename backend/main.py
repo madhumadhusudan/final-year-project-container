@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.detection.service import get_detection_service
 from app.routes.analysis import router as analysis_router
 from app.routes.protection import router as protection_router
+from app.routes.live import router as live_router
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ app.add_middleware(
 
 app.include_router(analysis_router)
 app.include_router(protection_router)
+app.include_router(live_router)
 
 
 @app.get("/")

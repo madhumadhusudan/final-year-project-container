@@ -378,6 +378,63 @@ class AnalysisResponse(BaseModel):
     performance: PerformanceDetails
 
 
+LiveRegionCategory = Literal[
+    "face", "license_plate", "payment_card", "identity_document",
+    "qr_code", "barcode", "sensitive_text",
+]
+
+
+class LiveRegion(BaseModel):
+    """A privacy region in analysis-frame pixel coordinates.
+
+    Stable temporal track IDs intentionally remain a browser concern. The backend
+    IDs identify detections only within this response and never identify people.
+    """
+
+    detection_id: str
+    category: LiveRegionCategory
+    bounding_box: BoundingBox
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    role: Literal["main_subject", "background_face", "unclassified"] | None = None
+
+
+class LiveModuleResult(BaseModel):
+    status: Literal["completed", "unavailable", "error", "skipped"]
+    duration_ms: int = Field(default=0, ge=0)
+    detection_count: int = Field(default=0, ge=0)
+    message: str | None = None
+
+
+class LiveRiskSummary(BaseModel):
+    score: int = Field(ge=0, le=100)
+    level: RiskLevel
+
+
+class LiveFramePerformance(BaseModel):
+    total_analysis_ms: int = Field(ge=0)
+    server_received_at_ms: int = Field(ge=0)
+    server_completed_at_ms: int = Field(ge=0)
+
+
+class LiveFrameResponse(BaseModel):
+    status: Literal["success"] = "success"
+    frame_id: int = Field(gt=0)
+    captured_at_ms: int = Field(ge=0)
+    image: ImageDetails
+    regions: list[LiveRegion]
+    main_subject: MainSubjectDetails
+    modules: dict[str, LiveModuleResult]
+    risk: LiveRiskSummary
+    performance: LiveFramePerformance
+
+
+class LiveCapabilitiesResponse(BaseModel):
+    analysis_widths: list[int]
+    modules: dict[str, bool]
+    local_processing_only: Literal[True] = True
+    frame_storage: Literal["none"] = "none"
+
+
 class ProtectionSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

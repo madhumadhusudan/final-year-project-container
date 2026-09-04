@@ -18,6 +18,38 @@ export async function getBackendHealth(signal) {
   return data
 }
 
+export async function getLiveCapabilities(signal) {
+  const response = await fetch(`${API_BASE_URL}/live/capabilities`, {
+    headers: { Accept: 'application/json' }, signal,
+  })
+  if (!response.ok) throw new Error('Live detector capabilities are unavailable.')
+  return response.json()
+}
+
+export async function analyzeFrame(blob, request, signal) {
+  const formData = new FormData()
+  formData.append('image', blob, `frame-${request.frameId}.jpg`)
+  formData.append('frame_id', String(request.frameId))
+  formData.append('captured_at_ms', String(request.capturedAtMs))
+  formData.append('modules', request.modules.join(','))
+  formData.append('preserve_main_subject', String(request.preserveMainSubject))
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}/analyze-frame`, {
+      method: 'POST', body: formData, headers: { Accept: 'application/json' }, signal,
+    })
+  } catch (error) {
+    if (error.name === 'AbortError') throw error
+    throw new Error('Live privacy detection unavailable.')
+  }
+  if (!response.ok) {
+    const message = await getErrorMessage(response)
+    throw new Error(message === 'Image analysis failed. Please check the image and try again.'
+      ? 'Live privacy detection unavailable.' : message)
+  }
+  return response.json()
+}
+
 async function getErrorMessage(response) {
   try {
     const data = await response.json()

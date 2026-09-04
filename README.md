@@ -2,7 +2,7 @@
 
 Context-aware, local image anonymization for safer social-media sharing. This B.E. final-year project detects privacy risks, identifies a likely main subject, and selectively protects only sensitive regions.
 
-> **Current status: Day 11 — QR and Barcode Privacy Pipeline**
+> **Current status: Day 13 — Real-Time Camera Privacy Protection prototype**
 
 ## What Works
 
@@ -25,6 +25,37 @@ Context-aware, local image anonymization for safer social-media sharing. This B.
 - Real local OpenCV barcode detection/decoding for EAN-8, EAN-13, UPC-A, and UPC-E, with honest format/decode status and low-risk handling for standalone retail codes.
 - Document/card spatial association, grouped QR/barcode risk, independent overlay/protection controls, padded code anonymization, and explicit module failure states.
 - No permanent image storage and no external image-processing APIs.
+- `/live` protected camera preview with explicit video-only permission, deterministic cleanup, front/back camera switching, and a privacy-first full-frame fallback blur.
+- In-memory downscaled frame analysis with single-request backpressure, frame-ID stale-result rejection, multi-rate detector scheduling, and adaptive face cadence.
+- Browser-side blur, pixelation, and blackout over tracked regions, with coordinate-space conversion, temporal smoothing, detection-miss grace periods, and stable/manual main-subject selection.
+- Real render/analysis FPS and request-latency measurements, live risk/warnings, tab visibility throttling, and honest detector availability.
+
+## Day 13 Live Pipeline
+
+```text
+Webcam video (never displayed raw)
+  → protected canvas rendered at browser refresh cadence
+  → downscaled 480 / 640 / 768 px JPEG sample
+  → one in-flight POST /analyze-frame request at most
+  → selected local detector groups (faces fast; heavy modules slower)
+  → analysis-frame boxes mapped to native video and canvas coordinates
+  → category-aware spatial track association + smoothing + miss grace
+  → preserve stable/manual main-subject track when requested
+  → browser canvas blur / pixelate / blackout
+```
+
+Balanced mode targets face analysis every 180 ms, QR/barcodes every 1000 ms,
+plates every 1200 ms, cards and OCR every 1800 ms, and documents every 2000 ms.
+Performance and Accuracy modes change both analysis width and intervals. These are
+scheduling targets, not promised frame rates; the face interval increases within
+bounds when measured request latency is high. Only one heavy group is added to a
+face request at a time, OCR never runs on every rendered frame, and hidden tabs
+pause new analysis requests.
+
+The current local installation reports plate and identity-document detection as
+unavailable because their dedicated model weights are absent. Their live controls
+are disabled rather than implying coverage. Face, payment-card, QR, barcode, and
+OCR availability is discovered from `GET /live/capabilities`.
 
 ## Day 11 Pipeline
 
@@ -135,6 +166,8 @@ Missing plate/card/document models are reported as `unavailable`; a working mode
 - `POST /analyze` — multipart `image`; returns structured analysis and timings
 - `POST /api/v1/analyze/image` — compatibility alias for `/analyze`
 - `POST /protect` — multipart `image`, serialized `analysis`, and serialized `settings`; returns protected image bytes
+- `GET /live/capabilities` — reports genuinely loaded local live detector modules and supported analysis widths
+- `POST /analyze-frame` — multipart downscaled `image`, `frame_id`, `captured_at_ms`, detector `modules`, and `preserve_main_subject`; returns transient regions and timings
 
 Default protection settings:
 
@@ -193,7 +226,11 @@ npm.cmd test
 npm.cmd run build
 ```
 
-Day 11 adds safe synthetic tests for real multi-QR detection, URL/payment/contact/Wi-Fi decoding, masking, malicious-looking payload handling, EAN-13 decoding, product-barcode risk, unknown decode behavior, document/card association, grouped risk, module failure states, padding, precedence, blur/pixelate/blackout, and independent toggles. All Day 1–10 regression tests remain active.
+Day 13 adds synthetic live-frame API tests for validation, frame IDs, response
+schema, module availability, and no disk persistence. Frontend unit tests cover
+three-space coordinate mapping, region association, smoothing, miss grace,
+multi-rate scheduling, stale-response rejection, stream-track cleanup, risk, and
+protection toggles. All earlier regression tests remain active.
 
 ## Privacy and Limitations
 
@@ -208,4 +245,7 @@ Day 11 adds safe synthetic tests for real multi-QR detection, URL/payment/contac
 - Decoded code payloads are transient local strings. The API/UI returns only safe categories and masked previews; it never opens URLs, initiates payments, connects to Wi-Fi, executes payload text, or sends it to a cloud service.
 - Risk is a calibrated exposure indicator, not a probability of harm or a guarantee that unavailable detectors would find nothing.
 - Residual risk is derived from protection settings and successful-region metadata; detectors are intentionally not rerun on the altered image.
-- No identity verification, authenticity checking, face recognition, GAN replacement, generative inpainting, authentication, database, cloud storage, publishing, video, or live-camera processing is included in Day 11.
+- Live camera access still depends on browser secure-context rules (`localhost` is accepted by modern browsers; remote mobile testing normally requires HTTPS).
+- Camera permission, physical front/back switching, two-person movement quality, and the hardware privacy indicator require manual validation on the target device; headless tests cannot certify camera hardware behavior.
+- Canvas masks follow the latest local detections and reduce flicker but cannot guarantee zero exposure during fast movement, severe occlusion, detector misses, or unsupported categories. If detection becomes unavailable, the UI marks protection unavailable and applies a full-frame safety blur.
+- No identity verification, authenticity checking, face recognition, GAN replacement, generative inpainting, authentication, database, cloud storage, publishing, audio capture, video upload, or camera recording is included in Day 13.

@@ -9,6 +9,7 @@ import PrivacyControls from './components/PrivacyControls.jsx'
 import ResultsPanel from './components/ResultsPanel.jsx'
 import { analyzeImage, getBackendHealth, protectImage } from './services/api.js'
 import { getImageFileError } from './utils/imageFile.js'
+import LivePrivacyPage from './pages/LivePrivacyPage.jsx'
 
 const defaultPrivacySettings = {
   protect_background_faces: true,
@@ -22,7 +23,7 @@ const defaultPrivacySettings = {
   strength: 'medium',
 }
 
-function App() {
+function ImagePrivacyApp() {
   const [backendStatus, setBackendStatus] = useState('checking')
   const [selectedFile, setSelectedFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
@@ -221,6 +222,16 @@ function App() {
       <Footer />
     </div>
   )
+}
+
+function App() {
+  const [path, setPath] = useState(window.location.pathname)
+  useEffect(() => {
+    const updatePath = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', updatePath)
+    return () => window.removeEventListener('popstate', updatePath)
+  }, [])
+  return path.replace(/\/+$/, '') === '/live' ? <LivePrivacyPage /> : <ImagePrivacyApp />
 }
 
 export default App

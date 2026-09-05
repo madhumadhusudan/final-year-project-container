@@ -2,7 +2,7 @@
 
 Context-aware, local image anonymization for safer social-media sharing. This B.E. final-year project detects privacy risks, identifies a likely main subject, and selectively protects only sensitive regions.
 
-> **Current status: Day 13 — Real-Time Camera Privacy Protection prototype**
+> **Current status: Day 14 — Video File Privacy Analysis and Anonymization prototype**
 
 ## What Works
 
@@ -29,6 +29,34 @@ Context-aware, local image anonymization for safer social-media sharing. This B.
 - In-memory downscaled frame analysis with single-request backpressure, frame-ID stale-result rejection, multi-rate detector scheduling, and adaptive face cadence.
 - Browser-side blur, pixelation, and blackout over tracked regions, with coordinate-space conversion, temporal smoothing, detection-miss grace periods, and stable/manual main-subject selection.
 - Real render/analysis FPS and request-latency measurements, live risk/warnings, tab visibility throttling, and honest detector availability.
+- `/video` upload with strict container/size/duration validation and real OpenCV metadata.
+- Bounded asynchronous video jobs with frame-based progress, cancellation, and transient-file cleanup.
+- Configurable detector sampling, category-aware tracking, stable session-only IDs, motion prediction, and track expiry.
+- Temporally stable main-subject preservation with safe protection on uncertain or missed face checks.
+- Streaming blur, pixelation, or blackout at source resolution/FPS without per-frame image dumps.
+- MP4 output with optional safe FFmpeg H.264/audio muxing, honest codec/audio reporting, preview, and download.
+- Peak/persistence video risk, sampled-frame category frequency, residual risk, partial-coverage status, and measured timings.
+
+## Day 14 Video Pipeline
+
+```text
+Validated temporary video upload
+  → real duration / resolution / FPS / frame-count metadata
+  → bounded in-memory job queue (one heavy job by default)
+  → streaming OpenCV decode (no frame dump)
+  → profile-based detector sampling on a bounded analysis image
+  → category-aware temporal association and short track grace
+  → stable main-subject track or safe all-face protection fallback
+  → padded blur / pixelate / blackout on every output frame
+  → MP4 encode at source resolution and FPS
+  → optional FFmpeg H.264 encode and original-audio mux
+  → transient protected preview/download and sampled-frame risk report
+```
+
+Balanced analyzes at up to 960 px width: general objects every 7 frames,
+faces every 3, plates/cards/documents/codes every 10, and OCR every 20.
+Performance uses 640 px with wider intervals; Accuracy uses 1280 px with
+narrower intervals. Every decoded frame is still protected and encoded.
 
 ## Day 13 Live Pipeline
 
@@ -101,7 +129,8 @@ backend/
   app/detection/               YOLO, YuNet, plate, card, document, QR, and barcode detectors
   app/ocr/                     Local OCR and text normalization
   app/privacy/                 Sensitive-text/document classification and privacy-risk scoring
-  app/routes/                  /analyze and /protect
+  app/routes/                  Image, live-camera, and video job APIs
+  app/video/                   Video validation, analysis, tracking, jobs, and encoding
   app/utils/                   Secure image validation
   models/                      Local model weights; most are Git-ignored
   tests/                       Detection, OCR, API, and anonymization tests
@@ -156,6 +185,12 @@ The checked-in YuNet model supports face detection. `yolov8n.pt` and EasyOCR ass
 | `PRIVACY_OBJECT_CONFIDENCE_THRESHOLD` | `0.35` | Plate/card threshold |
 | `OCR_LANGUAGES` | `en` | EasyOCR languages |
 | `OCR_MODEL_DIRECTORY` | `backend/models/easyocr` | Local OCR assets |
+| `MAX_VIDEO_BYTES` | `157286400` | Maximum temporary video upload (150 MB) |
+| `MAX_VIDEO_DURATION_SECONDS` | `180` | Maximum prototype duration (3 minutes) |
+| `MAX_CONCURRENT_VIDEO_JOBS` | `1` | Bounded heavy video workers |
+| `VIDEO_OUTPUT_TTL_SECONDS` | `3600` | Protected-output download lifetime |
+| `VIDEO_TRACK_EXPIRY_FRAMES` | `18` | Maximum track age since its last detection |
+| `VIDEO_DEFAULT_FPS` | `25` | Safe fallback for invalid source FPS metadata |
 
 Missing plate/card/document models are reported as `unavailable`; a working model with zero detections is reported as `completed` with count `0`. No document model is bundled or inferred from COCO classes.
 
@@ -168,6 +203,13 @@ Missing plate/card/document models are reported as `unavailable`; a working mode
 - `POST /protect` — multipart `image`, serialized `analysis`, and serialized `settings`; returns protected image bytes
 - `GET /live/capabilities` — reports genuinely loaded local live detector modules and supported analysis widths
 - `POST /analyze-frame` — multipart downscaled `image`, `frame_id`, `captured_at_ms`, detector `modules`, and `preserve_main_subject`; returns transient regions and timings
+- `GET /video/capabilities` — limits, profiles, detector coverage, and FFmpeg/H.264 support
+- `POST /video/upload` — multipart `video`; returns a temporary ID and real metadata
+- `DELETE /video/upload/{upload_id}` — removes an unused temporary upload
+- `POST /video/process` — accepts an upload ID and settings; returns a background job ID
+- `GET /video/status/{job_id}` — real progress, stage, state, error, and final report
+- `DELETE /video/cancel/{job_id}` — signals cancellation and cleanup
+- `GET /video/result/{job_id}` — streams the actual protected MP4 while available
 
 Default protection settings:
 
@@ -232,6 +274,12 @@ three-space coordinate mapping, region association, smoothing, miss grace,
 multi-rate scheduling, stale-response rejection, stream-track cleanup, risk, and
 protection toggles. All earlier regression tests remain active.
 
+Day 14 adds generated, non-private video tests for real metadata, invalid-container
+rejection, asynchronous output/download, explicit upload deletion, cancellation
+cleanup, moving-region association/expiry, stable main-subject preservation, and
+sampled face/plate/QR/OCR masks between detector frames. Frontend tests cover
+video extension/size validation and metadata formatting.
+
 ## Privacy and Limitations
 
 - Images and detection crops are not logged or stored by the application.
@@ -248,4 +296,8 @@ protection toggles. All earlier regression tests remain active.
 - Live camera access still depends on browser secure-context rules (`localhost` is accepted by modern browsers; remote mobile testing normally requires HTTPS).
 - Camera permission, physical front/back switching, two-person movement quality, and the hardware privacy indicator require manual validation on the target device; headless tests cannot certify camera hardware behavior.
 - Canvas masks follow the latest local detections and reduce flicker but cannot guarantee zero exposure during fast movement, severe occlusion, detector misses, or unsupported categories. If detection becomes unavailable, the UI marks protection unavailable and applies a full-frame safety blur.
-- No identity verification, authenticity checking, face recognition, GAN replacement, generative inpainting, authentication, database, cloud storage, publishing, audio capture, video upload, or camera recording is included in Day 13.
+- Video detection quality drops with fast motion, long occlusion, tiny regions, motion blur, or wider detector cadence. Prediction and expiry reduce flicker but cannot guarantee perfect masks.
+- Manual representative-frame main-subject picking is not included; automatic temporal selection fails safe when its selected track is missed.
+- Without FFmpeg, OpenCV produces MP4V without audio and the UI reports that explicitly. With FFmpeg and `libx264`, the app encodes H.264 and maps optional original audio using argument arrays and `shell=False`.
+- Sources and intermediates are removed after success, failure, or worker-observed cancellation. Protected outputs are transient and cleaned opportunistically after their configured TTL.
+- No identity verification, authenticity checking, face recognition, GAN replacement, generative inpainting, authentication, database, cloud storage, publishing, or camera recording is included in Day 14.

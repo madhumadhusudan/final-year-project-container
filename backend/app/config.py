@@ -51,6 +51,17 @@ def _image_size_setting(name: str, default: str) -> int:
     return value
 
 
+def _positive_int_setting(name: str, default: str, minimum: int = 1) -> int:
+    raw_value = os.getenv(name, default)
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
+
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -103,9 +114,23 @@ class Settings:
     ocr_model_directory: Path = Path(
         os.getenv("OCR_MODEL_DIRECTORY", str(BACKEND_DIR / "models" / "easyocr"))
     )
+    max_video_bytes: int = _positive_int_setting("MAX_VIDEO_BYTES", str(150 * 1024 * 1024))
+    max_video_duration_seconds: int = _positive_int_setting("MAX_VIDEO_DURATION_SECONDS", "180")
+    max_concurrent_video_jobs: int = _positive_int_setting("MAX_CONCURRENT_VIDEO_JOBS", "1")
+    video_output_ttl_seconds: int = _positive_int_setting("VIDEO_OUTPUT_TTL_SECONDS", "3600", 60)
+    video_track_expiry_frames: int = _positive_int_setting("VIDEO_TRACK_EXPIRY_FRAMES", "18")
+    video_default_fps: int = _positive_int_setting("VIDEO_DEFAULT_FPS", "25")
 
 
 settings = Settings()
 
 ALLOWED_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 ALLOWED_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+
+VIDEO_MIME_TYPES = {
+    ".mp4": frozenset({"video/mp4", "application/mp4"}),
+    ".mov": frozenset({"video/quicktime"}),
+    ".avi": frozenset({"video/x-msvideo", "video/avi"}),
+    ".webm": frozenset({"video/webm"}),
+}
+ALLOWED_VIDEO_EXTENSIONS = frozenset(VIDEO_MIME_TYPES)

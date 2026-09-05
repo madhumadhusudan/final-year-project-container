@@ -8,12 +8,13 @@ const navigation = [
   { label: 'How It Works', href: '#how-it-works' },
   { label: 'Privacy', href: '#privacy' },
   { label: 'Live Privacy', href: '/live' },
+  { label: 'Video Privacy', href: '/video' },
 ]
 
-function Navbar({ backendStatus, liveMode = false }) {
+function Navbar({ backendStatus, liveMode = false, videoMode = false }) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const items = liveMode
-    ? [{ label: 'Image Privacy', href: '/#analyze' }, { label: 'Live Privacy', href: '/live' }]
+  const items = liveMode || videoMode
+    ? [{ label: 'Image Privacy', href: '/#analyze' }, { label: 'Live Privacy', href: '/live' }, { label: 'Video Privacy', href: '/video' }]
     : navigation
   const navigate = (event) => {
     const href = event.currentTarget.getAttribute('href')
@@ -26,7 +27,7 @@ function Navbar({ backendStatus, liveMode = false }) {
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/95 backdrop-blur">
       <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8" aria-label="Main navigation">
-        <a href={liveMode ? '/' : '#home'} onClick={navigate} className="flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-700">
+        <a href={liveMode || videoMode ? '/' : '#home'} onClick={navigate} className="flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-700">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal-700 text-white shadow-sm"><ShieldIcon className="h-5 w-5" /></span>
           <span className="truncate text-sm font-bold tracking-tight text-slate-900 sm:text-base">Social Media Privacy Guard</span>
         </a>

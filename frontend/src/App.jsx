@@ -10,6 +10,7 @@ import ResultsPanel from './components/ResultsPanel.jsx'
 import { analyzeImage, getBackendHealth, protectImage } from './services/api.js'
 import { getImageFileError } from './utils/imageFile.js'
 import LivePrivacyPage from './pages/LivePrivacyPage.jsx'
+import VideoPrivacyPage from './pages/VideoPrivacyPage.jsx'
 
 const defaultPrivacySettings = {
   protect_background_faces: true,
@@ -231,7 +232,10 @@ function App() {
     window.addEventListener('popstate', updatePath)
     return () => window.removeEventListener('popstate', updatePath)
   }, [])
-  return path.replace(/\/+$/, '') === '/live' ? <LivePrivacyPage /> : <ImagePrivacyApp />
+  const normalized = path.replace(/\/+$/, '')
+  if (normalized === '/live') return <LivePrivacyPage />
+  if (normalized === '/video') return <VideoPrivacyPage />
+  return <ImagePrivacyApp />
 }
 
 export default App

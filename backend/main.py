@@ -7,6 +7,7 @@ from app.detection.service import get_detection_service
 from app.routes.analysis import router as analysis_router
 from app.routes.protection import router as protection_router
 from app.routes.live import router as live_router
+from app.routes.video import router as video_router
 
 
 @asynccontextmanager
@@ -16,8 +17,8 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Social Media Privacy Guard API",
-    description="Local AI detection API for context-aware image anonymization.",
-    version="0.10.0",
+    description="Local AI detection API for context-aware image and video anonymization.",
+    version="0.14.0",
     lifespan=lifespan,
 )
 
@@ -28,7 +29,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["X-Protection-Metadata", "Content-Disposition"],
 )
@@ -36,6 +37,7 @@ app.add_middleware(
 app.include_router(analysis_router)
 app.include_router(protection_router)
 app.include_router(live_router)
+app.include_router(video_router)
 
 
 @app.get("/")

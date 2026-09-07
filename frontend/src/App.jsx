@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import AnalysisPanel from './components/AnalysisPanel.jsx'
+import AnalysisPerformanceControls from './components/AnalysisPerformanceControls.jsx'
 import BeforeAfterPanel from './components/BeforeAfterPanel.jsx'
 import Footer from './components/Footer.jsx'
 import HeroSection from './components/HeroSection.jsx'
@@ -24,6 +25,12 @@ const defaultPrivacySettings = {
   strength: 'medium',
 }
 
+const defaultAnalysisOptions = {
+  performance_profile: 'balanced', detect_objects: true, detect_faces: true,
+  detect_plates: true, detect_cards: true, detect_documents: true,
+  detect_qr: true, detect_barcodes: true, detect_sensitive_text: true,
+}
+
 function ImagePrivacyApp() {
   const [backendStatus, setBackendStatus] = useState('checking')
   const [selectedFile, setSelectedFile] = useState(null)
@@ -32,6 +39,8 @@ function ImagePrivacyApp() {
   const [uploadError, setUploadError] = useState('')
   const [analysisStatus, setAnalysisStatus] = useState('idle')
   const [analysisResult, setAnalysisResult] = useState(null)
+  const [analysisOptions, setAnalysisOptions] = useState(defaultAnalysisOptions)
+  const [analysisStage, setAnalysisStage] = useState('')
   const [analysisError, setAnalysisError] = useState('')
   const [privacySettings, setPrivacySettings] = useState(defaultPrivacySettings)
   const [protectionStatus, setProtectionStatus] = useState('idle')
@@ -137,10 +146,13 @@ function ImagePrivacyApp() {
     const controller = new AbortController()
     analysisControllerRef.current = controller
     setAnalysisStatus('analyzing')
+    setAnalysisStage('Preparing optimized image views...')
     setAnalysisResult(null)
     setAnalysisError('')
     try {
-      const result = await analyzeImage(selectedFile, controller.signal)
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      setAnalysisStage('Running selected detectors locally...')
+      const result = await analyzeImage(selectedFile, analysisOptions, controller.signal)
       if (analysisControllerRef.current !== controller) return
       setAnalysisResult(result)
       setAnalysisStatus('success')
@@ -151,7 +163,16 @@ function ImagePrivacyApp() {
     } finally {
       if (analysisControllerRef.current === controller) analysisControllerRef.current = null
     }
-  }, [selectedFile, clearProtection])
+  }, [selectedFile, clearProtection, analysisOptions])
+
+  const handleAnalysisOptionsChange = useCallback((nextOptions) => {
+    analysisControllerRef.current?.abort()
+    clearProtection()
+    setAnalysisOptions(nextOptions)
+    setAnalysisStatus('idle')
+    setAnalysisResult(null)
+    setAnalysisError('')
+  }, [clearProtection])
 
   const handleProtect = useCallback(async () => {
     if (!selectedFile || !analysisResult || analysisStatus !== 'success') return
@@ -204,8 +225,9 @@ function ImagePrivacyApp() {
               <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">Check an image before it goes public</h2>
               <p className="mt-2 leading-7 text-slate-600">Your image is sent only to your local detection service, processed transiently, and never retained.</p>
             </div>
+            <AnalysisPerformanceControls options={analysisOptions} onChange={handleAnalysisOptionsChange} disabled={analysisStatus === 'analyzing'} />
             <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.75fr)]">
-              <AnalysisPanel selectedFile={selectedFile} previewUrl={previewUrl} imageMetadata={imageMetadata} uploadError={uploadError} analysisStatus={analysisStatus} result={analysisResult} onFileSelect={selectImage} onRemove={removeImage} onImageLoaded={handleImageLoaded} onImageError={handleImageError} onAnalyze={handleAnalyze} />
+              <AnalysisPanel selectedFile={selectedFile} previewUrl={previewUrl} imageMetadata={imageMetadata} uploadError={uploadError} analysisStatus={analysisStatus} analysisStage={analysisStage} result={analysisResult} onFileSelect={selectImage} onRemove={removeImage} onImageLoaded={handleImageLoaded} onImageError={handleImageError} onAnalyze={handleAnalyze} />
               <PrivacyControls settings={privacySettings} onChange={handlePrivacySettingsChange} onProtect={handleProtect} canProtect={Boolean(selectedFile && analysisStatus === 'success')} protectionStatus={protectionStatus} error={protectionError} analysis={analysisResult?.analysis} />
             </div>
             <ResultsPanel analysisStatus={analysisStatus} hasImage={Boolean(selectedFile)} result={analysisResult} error={analysisError} />

@@ -108,7 +108,7 @@ class LocalYoloPrivacyDetector:
 
     def _sources(self, image_bgr: np.ndarray) -> tuple[list[np.ndarray], list[tuple[int, int]]]:
         height, width = image_bgr.shape[:2]
-        if self._tile_size is None or max(height, width) < round(self._tile_size * 1.5):
+        if self._tile_size is None or max(height, width) <= round(self._tile_size * 1.5):
             return [image_bgr], [(0, 0)]
         sources, offsets = [], []
         for y in self._tile_positions(height, self._tile_size, self._tile_overlap):
@@ -181,33 +181,58 @@ class LocalYoloPrivacyDetector:
         results = []
         raw_detection_count = 0
         image_height, image_width = image_bgr.shape[:2]
-        for prediction, source, (offset_x, offset_y) in zip(predictions, sources, offsets, strict=False):
-            if prediction.boxes is None:
-                continue
-            raw_detection_count += len(prediction.boxes)
-            prediction_objects = []
-            for xyxy, confidence, class_id in zip(
-                prediction.boxes.xyxy.cpu().tolist(), prediction.boxes.conf.cpu().tolist(),
-                prediction.boxes.cls.cpu().tolist(), strict=False,
+
+        def collect(run_predictions, run_sources, run_offsets, reject_tile_edges: bool):
+            collected: list[RawPrivacyObject] = []
+            seen = 0
+            for prediction, source, (offset_x, offset_y) in zip(
+                run_predictions, run_sources, run_offsets, strict=False,
+            ):
+                if prediction.boxes is None:
+                    continue
+                seen += len(prediction.boxes)
+                prediction_objects = []
+                for xyxy, confidence, class_id in zip(
+                    prediction.boxes.xyxy.cpu().tolist(), prediction.boxes.conf.cpu().tolist(),
+                    prediction.boxes.cls.cpu().tolist(), strict=False,
                 ):
-                label = normalize_model_label(prediction.names[int(class_id)])
-                x1, y1, x2, y2 = (round(value) for value in xyxy)
-                prediction_objects.append(RawPrivacyObject(label, float(confidence), x1, y1, x2, y2))
-            for candidate in prediction_objects:
-                if candidate.class_name not in self._allowed_classes:
-                    continue
-                x1, y1, x2, y2 = candidate.x1, candidate.y1, candidate.x2, candidate.y2
-                if len(sources) > 1 and self._touches_tile_edge(
-                    (x1, y1, x2, y2), (offset_x, offset_y), source.shape[:2], image_bgr.shape[:2]
-                ):
-                    continue
-                if not self._candidate_is_supported(candidate, prediction_objects):
-                    continue
-                x1, x2 = max(0, x1 + offset_x), min(image_width, x2 + offset_x)
-                y1, y2 = max(0, y1 + offset_y), min(image_height, y2 + offset_y)
-                if x2 <= x1 or y2 <= y1:
-                    continue
-                results.append(RawPrivacyObject(candidate.class_name, candidate.confidence, x1, y1, x2, y2))
+                    label = normalize_model_label(prediction.names[int(class_id)])
+                    x1, y1, x2, y2 = (round(value) for value in xyxy)
+                    prediction_objects.append(RawPrivacyObject(label, float(confidence), x1, y1, x2, y2))
+                for candidate in prediction_objects:
+                    if candidate.class_name not in self._allowed_classes:
+                        continue
+                    x1, y1, x2, y2 = candidate.x1, candidate.y1, candidate.x2, candidate.y2
+                    if reject_tile_edges and self._touches_tile_edge(
+                        (x1, y1, x2, y2), (offset_x, offset_y), source.shape[:2], image_bgr.shape[:2]
+                    ):
+                        continue
+                    if not self._candidate_is_supported(candidate, prediction_objects):
+                        continue
+                    x1, x2 = max(0, x1 + offset_x), min(image_width, x2 + offset_x)
+                    y1, y2 = max(0, y1 + offset_y), min(image_height, y2 + offset_y)
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+                    collected.append(RawPrivacyObject(candidate.class_name, candidate.confidence, x1, y1, x2, y2))
+            return collected, seen
+
+        results, raw_detection_count = collect(predictions, sources, offsets, len(sources) > 1)
+        # A large or rotated card can cross every tile boundary. When the model
+        # found candidates but boundary rejection removed them all, retry once on
+        # the complete image. This is a recall fallback, not an image-specific rule.
+        if not results and len(sources) > 1 and raw_detection_count:
+            try:
+                with self._lock:
+                    fallback = self._model.predict(
+                        image_bgr, conf=self._confidence_threshold,
+                        imgsz=self._inference_image_size,
+                        classes=self._prediction_class_ids, verbose=False,
+                    )
+            except Exception as exc:
+                raise RuntimeError("Dedicated privacy-object inference failed.") from exc
+            recovered, fallback_count = collect(fallback, [image_bgr], [(0, 0)], False)
+            results.extend(recovered)
+            raw_detection_count += fallback_count
         results = self._deduplicate(results)
         return PrivacyDetectionRun(
             detections=results,

@@ -183,7 +183,12 @@ class VideoAnalyzer:
             if region is None:
                 continue
             region = pad_region(region, PADDING[track.category], width, height)
-            if region is not None and self.anonymizer._apply(frame, region, protection_settings):
+            protection_category = {
+                "qr_code": "qr_codes", "barcode": "barcodes",
+            }.get(track.category, track.category)
+            if region is not None and self.anonymizer._apply(
+                frame, region, protection_settings, protection_category,
+            ):
                 self.protected_regions += 1
 
     def process_frame(self, frame, frame_index: int):

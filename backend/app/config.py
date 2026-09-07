@@ -62,6 +62,13 @@ def _positive_int_setting(name: str, default: str, minimum: int = 1) -> int:
     return value
 
 
+def _boolean_setting(name: str, default: str = "true") -> bool:
+    value = os.getenv(name, default).strip().lower()
+    if value not in {"true", "false", "1", "0", "yes", "no"}:
+        raise ValueError(f"{name} must be true or false")
+    return value in {"true", "1", "yes"}
+
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -120,6 +127,11 @@ class Settings:
     video_output_ttl_seconds: int = _positive_int_setting("VIDEO_OUTPUT_TTL_SECONDS", "3600", 60)
     video_track_expiry_frames: int = _positive_int_setting("VIDEO_TRACK_EXPIRY_FRAMES", "18")
     video_default_fps: int = _positive_int_setting("VIDEO_DEFAULT_FPS", "25")
+    image_parallel_detectors: bool = _boolean_setting("IMAGE_PARALLEL_DETECTORS", "true")
+    image_detector_workers: int = _positive_int_setting("IMAGE_DETECTOR_WORKERS", "4")
+    analysis_session_ttl_seconds: int = _positive_int_setting("ANALYSIS_SESSION_TTL_SECONDS", "600", 60)
+    analysis_session_max_entries: int = _positive_int_setting("ANALYSIS_SESSION_MAX_ENTRIES", "32")
+    yolo_max_detections: int = _positive_int_setting("YOLO_MAX_DETECTIONS", "100")
 
 
 settings = Settings()

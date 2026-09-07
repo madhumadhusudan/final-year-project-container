@@ -34,6 +34,13 @@ class CardDetector(LocalYoloPrivacyDetector):
     def _candidate_is_supported(
         self, candidate: RawPrivacyObject, prediction_objects: list[RawPrivacyObject]
     ) -> bool:
+        width, height = candidate.x2 - candidate.x1, candidate.y2 - candidate.y1
+        aspect_ratio = max(width, height) / max(1, min(width, height))
+        # ISO/IEC 7810 payment cards are roughly 1.59:1. Allow generous
+        # perspective/partial-view distortion while rejecting very elongated
+        # remotes and phones that the installed model can confuse with a card.
+        if aspect_ratio > 2.35:
+            return False
         if not self._component_confirmation:
             return True
         inside = [

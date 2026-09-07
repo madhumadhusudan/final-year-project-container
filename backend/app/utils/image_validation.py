@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import time
 from pathlib import Path
 
 import cv2
@@ -18,6 +20,8 @@ class DecodedImage:
     width: int
     height: int
     format: str
+    decode_ms: int = 0
+    content_sha256: str = ""
 
 
 def _detected_format(content: bytes) -> tuple[str, str] | None:
@@ -69,7 +73,9 @@ async def read_and_validate_image(upload: UploadFile) -> DecodedImage:
         )
 
     encoded = np.frombuffer(content, dtype=np.uint8)
+    decode_started = time.perf_counter()
     image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+    decode_ms = max(0, round((time.perf_counter() - decode_started) * 1000))
     if image is None or image.ndim != 3 or image.shape[2] != 3:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -84,4 +90,7 @@ async def read_and_validate_image(upload: UploadFile) -> DecodedImage:
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="Image resolution is too large. Use an image under 50 megapixels.",
         )
-    return DecodedImage(image, width, height, image_format)
+    return DecodedImage(
+        image, width, height, image_format, decode_ms=decode_ms,
+        content_sha256=hashlib.sha256(content).hexdigest(),
+    )

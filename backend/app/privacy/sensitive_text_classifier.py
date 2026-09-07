@@ -15,6 +15,19 @@ CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 EXPIRY = re.compile(r"(?<!\d)(?:0[1-9]|1[0-2])/(?:\d{2}|\d{4})(?!\d)")
 PINCODE = re.compile(r"(?<!\d)[1-9]\d{5}(?!\d)")
 ADDRESS_WORDS = re.compile(r"(?i)\b(?:road|rd|street|st|nagar|layout|main|cross|district|taluk|village|pin|pincode)\b")
+NUMERIC_CONTEXT = re.compile(r"(?i)\b(?:phone|mobile|telephone|tel|aadhaar|aadhar|card|pin|pincode)\b")
+
+
+def _contextual_numeric_value(value: str) -> str:
+    """Repair a narrow OCR O/0 confusion only when an explicit numeric label exists.
+
+    Applying this globally would turn ordinary words into identifiers and increase
+    false positives. The candidate must retain enough digits for the downstream
+    format validators to make the final decision.
+    """
+    if not NUMERIC_CONTEXT.search(value) or sum(character.isdigit() for character in value) < 5:
+        return value
+    return value.replace("O", "0").replace("o", "0")
 
 
 def luhn_valid(value: str) -> bool:
@@ -69,6 +82,7 @@ class SensitiveTextClassifier:
         address_context = any(ADDRESS_WORDS.search(text.normalized_text) for text in texts)
         for text in texts:
             value = text.normalized_text
+            numeric_value = _contextual_numeric_value(value)
             display_value = value
             kind = reason = None
             pattern_confidence = 0.0
@@ -86,26 +100,26 @@ class SensitiveTextClassifier:
             elif (match := PAN.search(value)):
                 kind, reason, pattern_confidence = "pan_like_number", "Matches the Indian PAN-like alphanumeric structure.", 0.94
                 display_value = match.group()
-            elif (match := PHONE.search(value)):
+            elif (match := PHONE.search(numeric_value)):
                 kind, reason, pattern_confidence = "phone_number", "Matches a likely Indian phone-number format.", 0.94
                 display_value = match.group()
-            elif (card_match := CARD.search(value)):
+            elif (card_match := CARD.search(numeric_value)):
                 luhn = luhn_valid(card_match.group())
                 if luhn or in_card:
                     kind, reason = "payment_card_number", "Matches a payment-card-length sequence with Luhn or confirmed card-region support."
                     pattern_confidence = 0.98 if luhn else 0.82
                     display_value = card_match.group()
-            elif (match := AADHAAR.search(value)):
+            elif (match := AADHAAR.search(numeric_value)):
                 kind, reason, pattern_confidence = "aadhaar_like_number", "Matches a 12-digit Aadhaar-like structure; identity is not verified.", 0.88
                 display_value = match.group()
             elif (match := EXPIRY.search(value)) and in_card:
                 kind, reason, pattern_confidence = "possible_expiry_date", "Matches an expiry-date pattern inside a confirmed card region.", 0.88
                 display_value = match.group()
-            elif ADDRESS_WORDS.search(value):
-                kind, reason, pattern_confidence = "possible_address", "Contains address-specific terms; classified conservatively.", 0.72
-            elif (match := PINCODE.search(value)) and address_context:
+            elif (match := PINCODE.search(numeric_value)) and address_context:
                 kind, reason, pattern_confidence = "pincode", "Matches an Indian PIN code near address-like text.", 0.76
                 display_value = match.group()
+            elif ADDRESS_WORDS.search(value):
+                kind, reason, pattern_confidence = "possible_address", "Contains address-specific terms; classified conservatively.", 0.72
             if kind is None:
                 continue
             confidence = round(min(1.0, 0.65 * text.confidence + 0.35 * pattern_confidence), 6)

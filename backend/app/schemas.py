@@ -83,7 +83,7 @@ class ObjectDetectionDetails(BaseModel):
 
 
 class FaceDetectionDetails(BaseModel):
-    status: Literal["completed", "error"] = "completed"
+    status: Literal["completed", "error", "skipped"] = "completed"
     detector: str
     face_count: int = Field(ge=0)
     faces: list[FaceResult]
@@ -131,7 +131,7 @@ class DetectorDiagnostics(BaseModel):
 
 
 class LicensePlateDetectionDetails(BaseModel):
-    status: Literal["completed", "error", "unavailable"]
+    status: Literal["completed", "error", "unavailable", "skipped"]
     detector: str
     plate_count: int = Field(ge=0)
     plates: list[PrivacyObjectResult]
@@ -141,7 +141,7 @@ class LicensePlateDetectionDetails(BaseModel):
 
 
 class CardDetectionDetails(BaseModel):
-    status: Literal["completed", "error", "unavailable"]
+    status: Literal["completed", "error", "unavailable", "skipped"]
     detector: str
     card_count: int = Field(ge=0)
     cards: list[CardResult]
@@ -172,7 +172,7 @@ class DocumentResult(BaseModel):
 
 
 class DocumentDetectionDetails(BaseModel):
-    status: Literal["completed", "error", "unavailable"]
+    status: Literal["completed", "error", "unavailable", "skipped"]
     detector: str
     document_count: int = Field(ge=0)
     documents: list[DocumentResult]
@@ -217,7 +217,7 @@ class BarcodeResult(BaseModel):
 
 
 class QRDetectionDetails(BaseModel):
-    status: Literal["completed", "error", "unavailable"]
+    status: Literal["completed", "error", "unavailable", "skipped"]
     detector: str
     qr_count: int = Field(ge=0)
     items: list[QRCodeResult]
@@ -225,7 +225,7 @@ class QRDetectionDetails(BaseModel):
 
 
 class BarcodeDetectionDetails(BaseModel):
-    status: Literal["completed", "error", "unavailable"]
+    status: Literal["completed", "error", "unavailable", "skipped"]
     detector: str
     barcode_count: int = Field(ge=0)
     items: list[BarcodeResult]
@@ -242,7 +242,7 @@ class OCRTextResult(BaseModel):
 
 
 class OCRDetails(BaseModel):
-    status: Literal["completed", "error", "unavailable"]
+    status: Literal["completed", "error", "unavailable", "skipped"]
     engine: str
     languages: list[str]
     text_count: int = Field(ge=0)
@@ -266,7 +266,7 @@ class SensitiveTextResult(BaseModel):
 
 
 class SensitiveTextDetails(BaseModel):
-    status: Literal["completed", "error", "unavailable"]
+    status: Literal["completed", "error", "unavailable", "skipped"]
     count: int = Field(ge=0)
     items: list[SensitiveTextResult]
     message: str | None = None
@@ -369,6 +369,16 @@ class PerformanceDetails(BaseModel):
     ocr_detection_ms: int = Field(ge=0)
     sensitive_text_analysis_ms: int = Field(ge=0)
     total_analysis_ms: int = Field(ge=0)
+    image_decode_ms: int = Field(default=0, ge=0)
+    image_preprocess_ms: int = Field(default=0, ge=0)
+    yolo_ms: int = Field(default=0, ge=0)
+    plate_detection_ms: int = Field(default=0, ge=0)
+    ocr_ms: int = Field(default=0, ge=0)
+    risk_score_ms: int = Field(default=0, ge=0)
+    device: Literal["cpu", "cuda"] = "cpu"
+    performance_profile: Literal["fast", "balanced", "accuracy"] = "balanced"
+    parallel_execution: bool = False
+    enabled_modules: list[str] = Field(default_factory=list)
 
 
 class AnalysisResponse(BaseModel):
@@ -376,6 +386,21 @@ class AnalysisResponse(BaseModel):
     image: ImageDetails
     analysis: AnalysisDetails
     performance: PerformanceDetails
+    analysis_id: str | None = None
+
+
+class AnalysisOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    performance_profile: Literal["fast", "balanced", "accuracy"] = "balanced"
+    detect_objects: bool = True
+    detect_faces: bool = True
+    detect_plates: bool = True
+    detect_cards: bool = True
+    detect_documents: bool = True
+    detect_qr: bool = True
+    detect_barcodes: bool = True
+    detect_sensitive_text: bool = True
 
 
 LiveRegionCategory = Literal[

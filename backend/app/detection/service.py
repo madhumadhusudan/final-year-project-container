@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 from app.config import Settings, settings
 from app.schemas import (
-    AnalysisDetails, AnalysisResponse, BarcodeDetectionDetails, BarcodeResult, BoundingBox,
+    AnalysisDetails, AnalysisOptions, AnalysisResponse, BarcodeDetectionDetails, BarcodeResult, BoundingBox,
     CardDetectionDetails, CardResult, DetectionResult, DetectorDiagnostics, DocumentDetectionDetails,
     FaceDetectionDetails, FaceResult, ImageDetails, LicensePlateDetectionDetails,
     ObjectDetectionDetails, OCRDetails, OCRTextResult, PerformanceDetails, Point,
@@ -21,6 +22,10 @@ from app.privacy.document_classifier import DocumentClassifier
 from app.privacy.code_content_classifier import CodeContentClassifier
 from app.privacy.risk_score import PrivacyRiskEngine
 from app.utils.image_validation import DecodedImage
+from app.utils.analysis_coordinates import AnalysisImageCache
+from app.analysis.image_optimizer import (
+    FACE_MAX_SIDE, PRIVACY_MAX_SIDE, YOLO_IMAGE_SIZE, extract_text_optimized, scale_values, scaled_detect,
+)
 
 from .yolo_detector import YoloDetector
 from .face_detector import FaceDetector, UnavailableFaceDetector
@@ -28,6 +33,10 @@ from .card_detector import CardDetector
 from .license_plate_detector import LicensePlateDetector
 from .document_detector import DocumentDetector
 from .code_detector import CodeDetector
+from .registry import DetectorRegistry
+
+
+_DETECTOR_EXECUTOR = ThreadPoolExecutor(max_workers=max(2, settings.image_detector_workers), thread_name_prefix="image-detector")
 
 
 class DetectionService:
@@ -35,7 +44,7 @@ class DetectionService:
                  plate_detector: LicensePlateDetector | None = None, card_detector: CardDetector | None = None,
                  ocr_service: OCRService | UnavailableOCRService | None = None,
                  document_detector: DocumentDetector | None = None,
-                 code_detector: CodeDetector | None = None) -> None:
+                 code_detector: CodeDetector | None = None, device: str = "cpu") -> None:
         self._detector = detector
         self._face_detector = face_detector
         self._settings = app_settings
@@ -49,6 +58,7 @@ class DetectionService:
         self._document_classifier = DocumentClassifier()
         self._code_classifier = CodeContentClassifier()
         self._risk_engine = PrivacyRiskEngine()
+        self._device = device
 
     @staticmethod
     def _privacy_results(
@@ -141,11 +151,38 @@ class DetectionService:
                 ))
         return results
 
-    def analyze(self, decoded: DecodedImage, filename: str) -> AnalysisResponse:
+    def analyze(self, decoded: DecodedImage, filename: str, options: AnalysisOptions | None = None) -> AnalysisResponse:
         total_started = time.perf_counter()
-        started = time.perf_counter()
-        predictions = self._detector.detect(decoded.pixels_bgr)
-        object_ms = max(0, round((time.perf_counter() - started) * 1000))
+        options = options or AnalysisOptions()
+        image_cache = AnalysisImageCache(decoded.pixels_bgr)
+        yolo_size = YOLO_IMAGE_SIZE[options.performance_profile]
+        face_size = FACE_MAX_SIDE[options.performance_profile]
+        privacy_size = PRIVACY_MAX_SIDE[options.performance_profile]
+        yolo_args = (yolo_size,) if hasattr(self._detector, "inference_image_size") else ()
+        qr_args = (
+            (True,)
+            if getattr(self._code_detector, "supports_exhaustive_qr", False)
+            else ()
+        )
+        # YuNet and YOLO have independent, locked model instances. Starting both
+        # together reduces wall time without concurrent access to either model.
+        object_future = face_future = qr_future = None
+        parallel = bool(self._settings.image_parallel_detectors and options.detect_objects and options.detect_faces)
+        if parallel:
+            image_cache.get(yolo_size)
+            image_cache.get(face_size)
+            if options.detect_qr and self._code_detector is not None and self._code_detector.qr_available:
+                image_cache.get(privacy_size)
+                qr_future = _DETECTOR_EXECUTOR.submit(
+                    scaled_detect, self._code_detector, image_cache, privacy_size, "detect_qr",
+                    qr_args,
+                )
+            object_future = _DETECTOR_EXECUTOR.submit(scaled_detect, self._detector, image_cache, yolo_size, "detect", yolo_args)
+            face_future = _DETECTOR_EXECUTOR.submit(scaled_detect, self._face_detector, image_cache, face_size)
+        if options.detect_objects:
+            predictions, object_ms = object_future.result() if object_future else scaled_detect(self._detector, image_cache, yolo_size, method_args=yolo_args)
+        else:
+            predictions, object_ms = [], 0
         valid_predictions = []
         for prediction in predictions:
             clipped = prediction.clipped(decoded.width, decoded.height)
@@ -162,14 +199,16 @@ class DetectionService:
             )
             for index, detection in enumerate(valid_predictions, start=1)
         ]
-        face_started = time.perf_counter()
         face_error = None
-        try:
-            raw_faces = self._face_detector.detect(decoded.pixels_bgr)
-        except RuntimeError:
-            raw_faces = []
-            face_error = "Face detection was unavailable for this image."
-        face_ms = max(0, round((time.perf_counter() - face_started) * 1000))
+        face_status = "skipped" if not options.detect_faces else "completed"
+        if options.detect_faces:
+            try:
+                raw_faces, face_ms = face_future.result() if face_future else scaled_detect(self._face_detector, image_cache, face_size)
+            except RuntimeError:
+                raw_faces, face_ms, face_status = [], 0, "error"
+                face_error = "Face detection was unavailable for this image."
+        else:
+            raw_faces, face_ms = [], 0
         image_area = decoded.width * decoded.height
         image_diagonal = (decoded.width ** 2 + decoded.height ** 2) ** 0.5
         faces = []
@@ -195,12 +234,14 @@ class DetectionService:
             ))
         plate_started = time.perf_counter()
         plate_error = None
-        if self._plate_detector is None:
+        if not options.detect_plates:
+            raw_plates, plate_status = [], "skipped"
+        elif self._plate_detector is None:
             raw_plates = []
             plate_status = "unavailable"
         else:
             try:
-                raw_plates = self._plate_detector.detect(decoded.pixels_bgr)
+                raw_plates, _ = scaled_detect(self._plate_detector, image_cache, privacy_size)
                 plate_status = "completed"
             except RuntimeError:
                 raw_plates, plate_status, plate_error = [], "error", "License plate detection failed locally."
@@ -211,23 +252,26 @@ class DetectionService:
         card_started = time.perf_counter()
         card_error = None
         card_run = None
-        if self._card_detector is None:
+        if not options.detect_cards:
+            raw_cards, card_status = [], "skipped"
+        elif self._card_detector is None:
             raw_cards = []
             card_status = "unavailable"
         else:
             try:
                 if hasattr(self._card_detector, "detect_with_diagnostics"):
-                    card_run = self._card_detector.detect_with_diagnostics(decoded.pixels_bgr)
-                    raw_cards = card_run.detections
+                    view = image_cache.get(privacy_size)
+                    card_run = self._card_detector.detect_with_diagnostics(view.pixels_bgr)
+                    raw_cards = scale_values(card_run.detections, view.scale_x, view.scale_y)
                 else:
-                    raw_cards = self._card_detector.detect(decoded.pixels_bgr)
+                    raw_cards, _ = scaled_detect(self._card_detector, image_cache, privacy_size)
                 card_status = "completed"
             except RuntimeError:
                 raw_cards, card_status, card_error = [], "error", "Payment card detection failed locally."
         card_ms = max(0, round((time.perf_counter() - card_started) * 1000))
         cards = self._privacy_results(raw_cards, decoded.width, decoded.height, cards=True)
         card_diagnostics = None
-        if self._settings.app_environment == "development":
+        if self._settings.app_environment == "development" and card_status == "completed":
             card_diagnostics = DetectorDiagnostics(
                 loaded=self._card_detector is not None,
                 model_name=getattr(self._card_detector, "model_name", self._settings.card_model_path.name),
@@ -251,12 +295,14 @@ class DetectionService:
 
         document_started = time.perf_counter()
         document_error = None
-        if self._document_detector is None:
+        if not options.detect_documents:
+            raw_documents, document_status = [], "skipped"
+        elif self._document_detector is None:
             raw_documents = []
             document_status = "unavailable"
         else:
             try:
-                raw_documents = self._document_detector.detect(decoded.pixels_bgr)
+                raw_documents, _ = scaled_detect(self._document_detector, image_cache, privacy_size)
                 document_status = "completed"
             except RuntimeError:
                 raw_documents, document_status = [], "error"
@@ -266,24 +312,34 @@ class DetectionService:
 
         qr_started = time.perf_counter()
         qr_error = None
-        if self._code_detector is None or not self._code_detector.qr_available:
+        qr_inference_ms = None
+        if not options.detect_qr:
+            raw_qr_codes, qr_status = [], "skipped"
+        elif self._code_detector is None or not self._code_detector.qr_available:
             raw_qr_codes, qr_status = [], "unavailable"
         else:
             try:
-                raw_qr_codes = self._code_detector.detect_qr(decoded.pixels_bgr)
+                raw_qr_codes, qr_inference_ms = qr_future.result() if qr_future else scaled_detect(
+                    self._code_detector, image_cache, privacy_size, "detect_qr",
+                    qr_args,
+                )
                 qr_status = "completed"
             except RuntimeError:
                 raw_qr_codes, qr_status = [], "error"
                 qr_error = "Local QR detection failed for this image."
-        qr_ms = max(0, round((time.perf_counter() - qr_started) * 1000))
+        qr_ms = qr_inference_ms if qr_inference_ms is not None else max(
+            0, round((time.perf_counter() - qr_started) * 1000),
+        )
 
         barcode_started = time.perf_counter()
         barcode_error = None
-        if self._code_detector is None or not self._code_detector.barcode_available:
+        if not options.detect_barcodes:
+            raw_barcodes, barcode_status = [], "skipped"
+        elif self._code_detector is None or not self._code_detector.barcode_available:
             raw_barcodes, barcode_status = [], "unavailable"
         else:
             try:
-                raw_barcodes = self._code_detector.detect_barcodes(decoded.pixels_bgr)
+                raw_barcodes, _ = scaled_detect(self._code_detector, image_cache, privacy_size, "detect_barcodes")
                 barcode_status = "completed"
             except RuntimeError:
                 raw_barcodes, barcode_status = [], "error"
@@ -295,15 +351,19 @@ class DetectionService:
         main_subject = self._subject_analyzer.analyze(context_faces, detections)
         context_ms = max(0, round((time.perf_counter() - context_started) * 1000))
 
-        ocr_started = time.perf_counter()
-        try:
-            raw_texts = self._ocr_service.extract_text(decoded.pixels_bgr)
-            ocr_status, ocr_error = "completed", None
-        except RuntimeError:
-            raw_texts = []
-            ocr_status = "unavailable" if self._ocr_service.name.endswith("unavailable") else "error"
-            ocr_error = "The local OCR engine is unavailable." if ocr_status == "unavailable" else "Local OCR failed for this image."
-        ocr_ms = max(0, round((time.perf_counter() - ocr_started) * 1000))
+        if not options.detect_sensitive_text:
+            raw_texts, ocr_ms, ocr_status, ocr_error = [], 0, "skipped", "Disabled for this analysis."
+        else:
+            try:
+                raw_texts, ocr_ms = extract_text_optimized(
+                    self._ocr_service, image_cache, options.performance_profile,
+                    [item.bounding_box for item in [*plates, *cards, *document_regions]],
+                )
+                ocr_status, ocr_error = "completed", None
+            except RuntimeError:
+                raw_texts, ocr_ms = [], 0
+                ocr_status = "unavailable" if self._ocr_service.name.endswith("unavailable") else "error"
+                ocr_error = "The local OCR engine is unavailable." if ocr_status == "unavailable" else "Local OCR failed for this image."
         texts = []
         for raw in raw_texts:
             x1, y1 = max(0, min(raw.x1, decoded.width)), max(0, min(raw.y1, decoded.height))
@@ -339,10 +399,11 @@ class DetectionService:
         image_details = ImageDetails(
             filename=filename, width=decoded.width, height=decoded.height, format=decoded.format,
         )
+        risk_started = time.perf_counter()
         privacy_risk = self._risk_engine.calculate(
             image_details, faces, main_subject, plates, cards, sensitive_items,
             {
-                "face_detection": "error" if face_error else "completed",
+                "face_detection": face_status,
                 "license_plate_detection": plate_status,
                 "card_detection": card_status,
                 "document_detection": document_status,
@@ -354,6 +415,7 @@ class DetectionService:
             qr_codes=qr_codes,
             barcodes=barcodes,
         )
+        risk_ms = max(0, round((time.perf_counter() - risk_started) * 1000))
         background_face_count = sum(
             face.role in {"background_face", "unclassified"} for face in faces
         )
@@ -366,7 +428,7 @@ class DetectionService:
                 detections=detections,
                 object_detection=objects,
                 face_detection=FaceDetectionDetails(
-                    status="error" if face_error else "completed", detector=self._face_detector.name,
+                    status=face_status, detector=self._face_detector.name,
                     face_count=len(faces), faces=faces, error=face_error,
                 ),
                 main_subject=main_subject,
@@ -394,15 +456,15 @@ class DetectionService:
                     ),
                     model_source=self._settings.document_model_source or None,
                     model_license=self._settings.document_model_license or None,
-                    model_class_names=getattr(self._document_detector, "model_class_names", []),
-                    confidence_threshold=getattr(
+                    model_class_names=(getattr(self._document_detector, "model_class_names", []) if document_status == "completed" else []),
+                    confidence_threshold=(getattr(
                         self._document_detector, "confidence_threshold",
                         self._settings.document_confidence_threshold,
-                    ),
-                    inference_image_size=getattr(
+                    ) if document_status == "completed" else self._settings.document_confidence_threshold),
+                    inference_image_size=(getattr(
                         self._document_detector, "inference_image_size",
                         self._settings.document_inference_image_size,
-                    ),
+                    ) if document_status == "completed" else self._settings.document_inference_image_size),
                 ),
                 qr_detection=QRDetectionDetails(
                     status=qr_status,
@@ -448,42 +510,24 @@ class DetectionService:
                 code_classification_ms=code_classification_ms,
                 context_analysis_ms=context_ms,
                 ocr_detection_ms=ocr_ms, sensitive_text_analysis_ms=sensitive_ms,
+                image_decode_ms=decoded.decode_ms, image_preprocess_ms=image_cache.preprocess_ms,
+                yolo_ms=object_ms, plate_detection_ms=plate_ms, ocr_ms=ocr_ms,
+                risk_score_ms=risk_ms, device=self._device,
+                performance_profile=options.performance_profile, parallel_execution=parallel,
+                enabled_modules=[name for name, enabled in {
+                    "objects": options.detect_objects, "faces": options.detect_faces,
+                    "plates": options.detect_plates, "cards": options.detect_cards,
+                    "documents": options.detect_documents, "qr": options.detect_qr,
+                    "barcodes": options.detect_barcodes, "sensitive_text": options.detect_sensitive_text,
+                }.items() if enabled],
             ),
         )
 
 
 @lru_cache(maxsize=1)
 def get_detection_service() -> DetectionService:
-    detector = YoloDetector(settings.yolo_weights_path, settings.yolo_confidence_threshold)
-    try:
-        face_detector = FaceDetector(settings.face_model_path, settings.face_confidence_threshold)
-    except RuntimeError:
-        face_detector = UnavailableFaceDetector()
-    try:
-        plate_detector = LicensePlateDetector(settings.license_plate_model_path, settings.privacy_object_confidence_threshold)
-    except RuntimeError:
-        plate_detector = None
-    try:
-        card_detector = CardDetector(
-            settings.card_model_path, settings.card_confidence_threshold,
-            settings.card_inference_image_size, settings.card_tile_size, settings.card_tile_overlap,
-            settings.card_tile_inference_image_size,
-        )
-    except RuntimeError:
-        card_detector = None
-    try:
-        document_detector = DocumentDetector(
-            settings.document_model_path, settings.document_confidence_threshold,
-            settings.document_inference_image_size,
-        )
-    except RuntimeError:
-        document_detector = None
-    try:
-        ocr_service = OCRService(list(settings.ocr_languages), settings.ocr_model_directory)
-    except RuntimeError:
-        ocr_service = UnavailableOCRService()
-    code_detector = CodeDetector()
+    registry = DetectorRegistry(settings)
     return DetectionService(
-        detector, face_detector, settings, plate_detector, card_detector, ocr_service,
-        document_detector, code_detector,
+        registry.yolo, registry.face, settings, registry.plate, registry.card, registry.ocr,
+        registry.document, registry.code, registry.device,
     )

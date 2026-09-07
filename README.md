@@ -2,7 +2,15 @@
 
 Context-aware, local image anonymization for safer social-media sharing. This B.E. final-year project detects privacy risks, identifies a likely main subject, and selectively protects only sensitive regions.
 
-> **Current status: Day 14 — Video File Privacy Analysis and Anonymization prototype**
+> **Current status: Day 16 — Accuracy validation and reliability hardening (partial: optional plate/document models remain unavailable)**
+
+The Day 14 feature set is now performance-tuned: image analysis uses reusable detector-sized views,
+selective modules, safe YOLO/face overlap, ROI OCR, cached model instances, and expiring analysis IDs.
+
+Day 16 adds a synthetic-only formal accuracy suite, detector threshold/box metrics,
+FAST/BALANCED/ACCURACY comparison, real QR/barcode/OCR protection rereads, and
+regression hardening. See `docs/day16_accuracy_report.md` for measured results and
+explicitly unverified criteria; unavailable detectors are never reported as successful.
 
 ## What Works
 
@@ -85,6 +93,26 @@ unavailable because their dedicated model weights are absent. Their live control
 are disabled rather than implying coverage. Face, payment-card, QR, barcode, and
 OCR availability is discovered from `GET /live/capabilities`.
 
+## Optimized Image Pipeline
+
+```text
+Instant object-URL preview
+  -> one validated image decode
+  -> cached detector-sized BGR views
+  -> selected YOLO + face inference in parallel on CPU
+  -> conditional plate/card/document/code detectors
+  -> ROI OCR on document/card/plate/text-like regions
+  -> context and risk calculation
+  -> bounded 10-minute analysis session
+  -> /protect anonymization using analysis_id (no detector rerun)
+```
+
+Image profiles use these maximum sides: Fast `512` YOLO / `640` face / `768` privacy
+objects / `480` OCR; Balanced `640` / `800` / `960` / `640`; Accuracy `960` /
+`960` / `1280` / `1280`. Accuracy uses bounded full-frame OCR; Fast and Balanced
+use primary/text-like crops. All coordinates map back to the untouched original used
+by protection and download.
+
 ## Day 11 Pipeline
 
 ```text
@@ -105,7 +133,7 @@ Upload and validate image
   → Before/After preview, risk reduction, and local download
 ```
 
-`POST /analyze` returns the analysis once. `POST /protect` receives that analysis with the same original image and validates matching dimensions, so expensive detectors are not rerun. The protected image is returned directly as binary data; compact protection metadata is exposed in `X-Protection-Metadata`. No result database or permanent output file is used.
+`POST /analyze` returns the analysis once with an expiring `analysis_id`. `POST /protect` receives that ID with the same original image, verifies its SHA-256 content hash, and reuses the cached regions, so expensive detectors and OCR are not rerun. The earlier serialized-analysis request remains compatible. The protected image is returned directly as binary data; compact protection metadata is exposed in `X-Protection-Metadata`. No result database or permanent output file is used.
 
 The risk score uses only detected privacy evidence. A confidently selected main subject adds no face risk; background/unclassified faces, plates, cards, identity documents, QR codes, barcodes, classified sensitive text, and main-subject uncertainty do. QR risk depends on safe content category and context. Standalone decoded retail barcodes remain low risk, while undecodable or context-associated codes remain protectable. Identity-document codes add only a limited readability/context bonus instead of duplicating the full document risk. Final totals are clamped to 100.
 
@@ -191,6 +219,11 @@ The checked-in YuNet model supports face detection. `yolov8n.pt` and EasyOCR ass
 | `VIDEO_OUTPUT_TTL_SECONDS` | `3600` | Protected-output download lifetime |
 | `VIDEO_TRACK_EXPIRY_FRAMES` | `18` | Maximum track age since its last detection |
 | `VIDEO_DEFAULT_FPS` | `25` | Safe fallback for invalid source FPS metadata |
+| `IMAGE_PARALLEL_DETECTORS` | `true` | Safely overlap independent YOLO and face inference |
+| `IMAGE_DETECTOR_WORKERS` | `4` | Bounded image detector worker pool |
+| `ANALYSIS_SESSION_TTL_SECONDS` | `600` | In-memory analysis reuse lifetime |
+| `ANALYSIS_SESSION_MAX_ENTRIES` | `32` | Maximum expiring analysis records |
+| `YOLO_MAX_DETECTIONS` | `100` | Upper bound for general object predictions |
 
 Missing plate/card/document models are reported as `unavailable`; a working model with zero detections is reported as `completed` with count `0`. No document model is bundled or inferred from COCO classes.
 
@@ -198,9 +231,9 @@ Missing plate/card/document models are reported as `unavailable`; a working mode
 
 - `GET /` — service identity
 - `GET /health` — connectivity status
-- `POST /analyze` — multipart `image`; returns structured analysis and timings
+- `POST /analyze` — multipart `image` plus optional `analysis_options` or `performance_profile`; returns structured analysis, `analysis_id`, and timings
 - `POST /api/v1/analyze/image` — compatibility alias for `/analyze`
-- `POST /protect` — multipart `image`, serialized `analysis`, and serialized `settings`; returns protected image bytes
+- `POST /protect` — multipart `image`, `analysis_id` (or backward-compatible serialized `analysis`), and serialized `settings`; returns protected image bytes without detector inference
 - `GET /live/capabilities` — reports genuinely loaded local live detector modules and supported analysis widths
 - `POST /analyze-frame` — multipart downscaled `image`, `frame_id`, `captured_at_ms`, detector `modules`, and `preserve_main_subject`; returns transient regions and timings
 - `GET /video/capabilities` — limits, profiles, detector coverage, and FFmpeg/H.264 support

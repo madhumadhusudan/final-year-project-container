@@ -78,11 +78,20 @@ class ImageAnonymizer:
         image[region.y1:region.y2, region.x1:region.x2] = 0
         return True
 
-    def _apply(self, image: np.ndarray, region: Region, settings: ProtectionSettings) -> bool:
+    def _apply(
+        self, image: np.ndarray, region: Region, settings: ProtectionSettings, category: str = "",
+    ) -> bool:
+        # Low-strength visual degradation can remain machine-decodable. QR and
+        # barcode protection therefore has a medium-strength privacy floor.
+        strength = (
+            "medium"
+            if category in {"qr_codes", "barcodes"} and settings.strength == "low"
+            else settings.strength
+        )
         if settings.anonymization_method == "blur":
-            return self.blur_region(image, region, settings.strength)
+            return self.blur_region(image, region, strength)
         if settings.anonymization_method == "pixelate":
-            return self.pixelate_region(image, region, settings.strength)
+            return self.pixelate_region(image, region, strength)
         return self.blackout_region(image, region)
 
     @staticmethod
@@ -185,7 +194,9 @@ class ImageAnonymizer:
             "identity_documents", "cards", "license_plates", "qr_codes", "barcodes",
             "sensitive_text", "background_faces",
         ):
-            applied = sum(self._apply(image, region, settings) for region in category_regions[category])
+            applied = sum(
+                self._apply(image, region, settings, category) for region in category_regions[category]
+            )
             applied_counts[category] = applied
             counts[category] = applied + covered_code_counts.get(category, 0)
 

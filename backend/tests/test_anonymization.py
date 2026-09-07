@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
 from urllib.parse import unquote
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.anonymization.anonymizer import ImageAnonymizer
 from app.anonymization.region_utils import Region, merge_regions, pad_region, sanitize_region
+from app.analysis.session_cache import analysis_session_cache
 from app.schemas import AnalysisResponse, ProtectionSettings
 from main import app
 
@@ -335,6 +337,15 @@ class ProtectionApiTests(unittest.TestCase):
         self.assertEqual(metadata["risk"]["reduction_percent"], 100.0)
         protected = cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
         self.assertEqual(protected.shape, (80, 100, 3))
+
+    def test_analysis_id_reuses_cached_results_without_resending_payload(self) -> None:
+        analysis_id = analysis_session_cache.put(self.analysis, hashlib.sha256(self.encoded).hexdigest())
+        response = self.client.post("/protect", files={"image": ("test.png", self.encoded, "image/png")}, data={
+            "analysis_id": analysis_id, "settings": json.dumps({"anonymization_method": "blackout"}),
+        })
+        self.assertEqual(response.status_code, 200)
+        metadata = json.loads(unquote(response.headers["x-protection-metadata"]))
+        self.assertEqual(metadata["breakdown"]["sensitive_text"], 1)
 
     def test_invalid_settings_and_mismatched_analysis_are_clean_errors(self) -> None:
         invalid = self.client.post("/protect", files={"image": ("test.png", self.encoded, "image/png")}, data={

@@ -145,7 +145,7 @@ class PrivacyRiskEngine:
         return floors
 
     def _assessment(self, statuses: Mapping[str, str]) -> RiskAssessment:
-        unavailable = sorted(module for module, status in statuses.items() if status != "completed")
+        unavailable = sorted(module for module, status in statuses.items() if status not in {"completed", "skipped"})
         return RiskAssessment(
             status="partial" if unavailable else "complete",
             unavailable_modules=unavailable,

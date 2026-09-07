@@ -14,7 +14,7 @@ from app.detection.face_detector import FaceDetector
 from app.detection.code_detector import RawCodeDetection
 from app.detection.privacy_object_detector import RawPrivacyObject
 from app.ocr.ocr_service import RawOCRText
-from app.schemas import RawDetection
+from app.schemas import AnalysisOptions, RawDetection
 from app.utils.image_validation import DecodedImage
 from main import app
 
@@ -107,6 +107,22 @@ def encoded_png(width: int = 120, height: int = 80) -> bytes:
 
 
 class DetectionServiceTests(unittest.TestCase):
+    def test_disabled_detectors_are_not_called_and_report_skipped(self) -> None:
+        class MustNotRun:
+            name = "must_not_run"
+            def detect(self, _image):
+                raise AssertionError("disabled detector ran")
+        response = DetectionService(MustNotRun(), MustNotRun(), test_settings()).analyze(
+            DecodedImage(np.zeros((80, 120, 3), dtype=np.uint8), 120, 80, "PNG"), "skip.png",
+            AnalysisOptions(
+                detect_objects=False, detect_faces=False, detect_plates=False, detect_cards=False,
+                detect_documents=False, detect_qr=False, detect_barcodes=False, detect_sensitive_text=False,
+            ),
+        )
+        self.assertEqual(response.analysis.face_detection.status, "skipped")
+        self.assertEqual(response.analysis.ocr.status, "skipped")
+        self.assertEqual(response.performance.enabled_modules, [])
+
     def test_real_face_detector_model_initializes(self) -> None:
         detector = FaceDetector(test_settings().face_model_path, test_settings().face_confidence_threshold)
         self.assertEqual(detector.name, "opencv_yunet")

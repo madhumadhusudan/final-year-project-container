@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from app.anonymization import ImageAnonymizer
 from app.privacy.risk_score import PrivacyRiskEngine
+from app.analysis.session_cache import analysis_session_cache
 from app.schemas import AnalysisResponse, ProtectionSettings
 from app.utils.image_validation import DecodedImage, read_and_validate_image
 
@@ -78,11 +79,22 @@ def _protect(decoded: DecodedImage, analysis: AnalysisResponse, settings: Protec
 @router.post("/protect")
 async def protect_image(
     image: UploadFile = File(...),
-    analysis: str = Form(...),
+    analysis: str | None = Form(None),
+    analysis_id: str | None = Form(None),
     settings: str = Form(...),
 ) -> Response:
     decoded = await read_and_validate_image(image)
-    analysis_payload = _parse_payload(AnalysisResponse, analysis, "analysis")
+    if analysis is not None:
+        analysis_payload = _parse_payload(AnalysisResponse, analysis, "analysis")
+    elif analysis_id:
+        session = analysis_session_cache.get(analysis_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Analysis session expired. Analyze the image again.")
+        if session.content_sha256 != decoded.content_sha256:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The analysis does not match the uploaded image.")
+        analysis_payload = session.analysis
+    else:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Analysis or analysis_id is required.")
     privacy_settings = _parse_payload(ProtectionSettings, settings, "privacy settings")
     try:
         result, (content, media_type, extension) = await asyncio.to_thread(

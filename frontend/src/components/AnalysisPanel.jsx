@@ -4,7 +4,7 @@ import ImagePreview from './ImagePreview.jsx'
 import ImageUploader from './ImageUploader.jsx'
 import { RefreshIcon, SparkIcon, TrashIcon } from './Icons.jsx'
 
-function AnalysisPanel({ selectedFile, previewUrl, imageMetadata, uploadError, analysisStatus, result, onFileSelect, onRemove, onImageLoaded, onImageError, onAnalyze }) {
+function AnalysisPanel({ selectedFile, previewUrl, imageMetadata, uploadError, analysisStatus, analysisStage, result, onFileSelect, onRemove, onImageLoaded, onImageError, onAnalyze }) {
   const replacementInputRef = useRef(null)
   const [showObjects, setShowObjects] = useState(true)
   const [showFaces, setShowFaces] = useState(true)
@@ -33,7 +33,7 @@ function AnalysisPanel({ selectedFile, previewUrl, imageMetadata, uploadError, a
     <article className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="mb-5 flex items-start justify-between gap-4"><div><h3 className="text-lg font-bold text-slate-950">Image analysis</h3><p className="mt-1 text-sm leading-6 text-slate-600">Select one image for local privacy detection.</p></div><span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Step 1 of 3</span></div>
       {!selectedFile ? <ImageUploader onFileSelect={onFileSelect} error={uploadError} /> : <div>
-        <ImagePreview previewUrl={previewUrl} filename={selectedFile.name} image={result?.image} detections={detections} faces={faces} plates={plates} cards={cards} documents={documents} qrCodes={qrCodes} barcodes={barcodes} sensitiveTexts={sensitiveTexts} showObjects={showObjects} showFaces={showFaces} showPlates={showPlates} showCards={showCards} showDocuments={showDocuments} showQrCodes={showQrCodes} showBarcodes={showBarcodes} showSensitiveText={showSensitiveText} isAnalyzing={analysisStatus === 'analyzing'} onLoaded={onImageLoaded} onError={onImageError} />
+        <ImagePreview previewUrl={previewUrl} filename={selectedFile.name} image={result?.image} detections={detections} faces={faces} plates={plates} cards={cards} documents={documents} qrCodes={qrCodes} barcodes={barcodes} sensitiveTexts={sensitiveTexts} showObjects={showObjects} showFaces={showFaces} showPlates={showPlates} showCards={showCards} showDocuments={showDocuments} showQrCodes={showQrCodes} showBarcodes={showBarcodes} showSensitiveText={showSensitiveText} isAnalyzing={analysisStatus === 'analyzing'} analysisStage={analysisStage} onLoaded={onImageLoaded} onError={onImageError} />
         {(detections.length > 0 || faces.length > 0 || plates.length > 0 || cards.length > 0 || documents.length > 0 || qrCodes.length > 0 || barcodes.length > 0 || sensitiveTexts.length > 0) && <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1">
           {detections.length > 0 && <label className="inline-flex min-h-11 items-center gap-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={showObjects} onChange={(event) => setShowObjects(event.target.checked)} className="h-5 w-5 accent-cyan-600" /> Show Objects</label>}
           {faces.length > 0 && <label className="inline-flex min-h-11 items-center gap-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={showFaces} onChange={(event) => setShowFaces(event.target.checked)} className="h-5 w-5 accent-fuchsia-600" /> Show Faces</label>}

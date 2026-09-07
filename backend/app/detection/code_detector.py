@@ -27,6 +27,7 @@ class CodeDetector:
     barcode_name = "opencv_barcode_detector"
     # OpenCV's BarcodeDetector documentation limits decoding to these 1-D families.
     supported_barcode_formats = ("EAN-8", "EAN-13", "UPC-A", "UPC-E")
+    supports_exhaustive_qr = True
 
     def __init__(self) -> None:
         try:
@@ -84,7 +85,7 @@ class CodeDetector:
             format=code_format.strip().replace("_", "-") if code_format else None,
         )
 
-    def detect_qr(self, image_bgr: np.ndarray) -> list[RawCodeDetection]:
+    def _detect_qr_once(self, image_bgr: np.ndarray) -> list[RawCodeDetection]:
         if self._qr is None:
             raise RuntimeError("Local QR detector unavailable.")
         height, width = image_bgr.shape[:2]
@@ -111,6 +112,33 @@ class CodeDetector:
             if item is not None:
                 results.append(item)
         return results
+
+    def detect_qr(self, image_bgr: np.ndarray, exhaustive: bool = False) -> list[RawCodeDetection]:
+        """Detect locally, with a bounded upscale retry for small codes when requested.
+
+        Responsive live/video callers retain the single-pass default. Balanced and
+        Accuracy still-image analysis can opt into the retry when the native pass
+        finds nothing. Payloads remain transient in both paths.
+        """
+        results = self._detect_qr_once(image_bgr)
+        if results or not exhaustive:
+            return results
+        height, width = image_bgr.shape[:2]
+        pixel_count = max(1, width * height)
+        scale = min(2.0, (12_000_000 / pixel_count) ** 0.5)
+        if scale < 1.25:
+            return results
+        enlarged = cv2.resize(image_bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        enlarged_results = self._detect_qr_once(enlarged)
+        recovered: list[RawCodeDetection] = []
+        for item in enlarged_results:
+            polygon = np.asarray(
+                [(point[0] / scale, point[1] / scale) for point in item.polygon], dtype=np.float64,
+            )
+            mapped = self._result(polygon, item.payload, item.format, width, height)
+            if mapped is not None:
+                recovered.append(mapped)
+        return recovered
 
     def detect_barcodes(self, image_bgr: np.ndarray) -> list[RawCodeDetection]:
         if self._barcode is None:

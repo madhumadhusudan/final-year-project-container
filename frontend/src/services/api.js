@@ -62,9 +62,10 @@ async function getErrorMessage(response) {
   return 'Image analysis failed. Please check the image and try again.'
 }
 
-export async function analyzeImage(file, signal) {
+export async function analyzeImage(file, options, signal) {
   const formData = new FormData()
   formData.append('image', file, file.name)
+  formData.append('analysis_options', JSON.stringify(options))
   let response
   try {
     response = await fetch(`${API_BASE_URL}/analyze`, {
@@ -83,7 +84,8 @@ export async function analyzeImage(file, signal) {
 export async function protectImage(file, analysis, settings, signal) {
   const formData = new FormData()
   formData.append('image', file, file.name)
-  formData.append('analysis', JSON.stringify(analysis))
+  if (analysis.analysis_id) formData.append('analysis_id', analysis.analysis_id)
+  else formData.append('analysis', JSON.stringify(analysis))
   formData.append('settings', JSON.stringify(settings))
   let response
   try {
